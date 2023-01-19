@@ -2666,6 +2666,12 @@ bool firrtl::isConstant(Value value) {
   return false;
 }
 
+bool firrtl::isConst(Type type) {
+  if (auto base = type.dyn_cast<FIRRTLBaseType>())
+    return base.isConst();
+  return false;
+}
+
 FIRRTLType SubfieldOp::inferReturnType(ValueRange operands,
                                        ArrayRef<NamedAttribute> attrs,
                                        std::optional<Location> loc) {

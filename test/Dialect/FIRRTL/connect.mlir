@@ -141,4 +141,44 @@ firrtl.module @registers1(in %clock : !firrtl.clock) {
   firrtl.connect %0, %1 : !firrtl.uint<1>, !firrtl.uint<1>
 }
 
+firrtl.module @ConstClock(in %in : !firrtl.const.clock, out %out : !firrtl.const.clock) {
+  // CHECK: firrtl.connect %out, %in : !firrtl.const.clock, !firrtl.const.clock
+  firrtl.connect %out, %in : !firrtl.const.clock, !firrtl.const.clock
+}
+
+firrtl.module @ConstReset(in %in : !firrtl.const.reset, out %out : !firrtl.const.reset) {
+  // CHECK: firrtl.connect %out, %in : !firrtl.const.reset, !firrtl.const.reset
+  firrtl.connect %out, %in : !firrtl.const.reset, !firrtl.const.reset
+}
+
+firrtl.module @ConstAsyncReset(in %in : !firrtl.const.asyncreset, out %out : !firrtl.const.asyncreset) {
+  // CHECK: firrtl.connect %out, %in : !firrtl.const.asyncreset, !firrtl.const.asyncreset
+  firrtl.connect %out, %in : !firrtl.const.asyncreset, !firrtl.const.asyncreset
+}
+
+firrtl.module @ConstUInt(in %in : !firrtl.const.uint<2>, out %out : !firrtl.const.uint<2>) {
+  // CHECK: firrtl.connect %out, %in : !firrtl.const.uint<2>, !firrtl.const.uint<2>
+  firrtl.connect %out, %in : !firrtl.const.uint<2>, !firrtl.const.uint<2>
+}
+
+firrtl.module @ConstSInt(in %in : !firrtl.const.sint<2>, out %out : !firrtl.const.sint<2>) {
+  // CHECK: firrtl.connect %out, %in : !firrtl.const.sint<2>, !firrtl.const.sint<2>
+  firrtl.connect %out, %in : !firrtl.const.sint<2>, !firrtl.const.sint<2>
+}
+
+firrtl.module @ConstVec(in %in : !firrtl.const.vector<uint<1>, 3>, out %out : !firrtl.const.vector<uint<1>, 3>) {
+  // CHECK: firrtl.connect %out, %in : !firrtl.const.vector<uint<1>, 3>, !firrtl.const.vector<uint<1>, 3>
+  firrtl.connect %out, %in : !firrtl.const.vector<uint<1>, 3>, !firrtl.const.vector<uint<1>, 3>
+}
+
+firrtl.module @ConstBundle(in %in : !firrtl.const.bundle<a: uint<1>, b: sint<2>>, out %out : !firrtl.const.bundle<a: uint<1>, b: sint<2>>) {
+  // CHECK: firrtl.connect %out, %in : !firrtl.const.bundle<a: uint<1>, b: sint<2>>, !firrtl.const.bundle<a: uint<1>, b: sint<2>>
+  firrtl.connect %out, %in : !firrtl.const.bundle<a: uint<1>, b: sint<2>>, !firrtl.const.bundle<a: uint<1>, b: sint<2>>
+}
+
+firrtl.module @MixedConstBundle(in %in : !firrtl.bundle<a: uint<1>, b: const.sint<2>>, out %out : !firrtl.bundle<a: uint<1>, b: const.sint<2>>) {
+  // CHECK: firrtl.connect %out, %in : !firrtl.bundle<a: uint<1>, b: const.sint<2>>, !firrtl.bundle<a: uint<1>, b: const.sint<2>>
+  firrtl.connect %out, %in : !firrtl.bundle<a: uint<1>, b: const.sint<2>>, !firrtl.bundle<a: uint<1>, b: const.sint<2>>
+}
+
 }

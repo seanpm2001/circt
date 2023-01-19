@@ -39,7 +39,13 @@ using mlir::TypeStorageAllocator;
 ///
 /// This only prints a subset of all types in the dialect. Use `printNestedType`
 /// instead, which will call this function in turn, as appropriate.
-static LogicalResult customTypePrinter(Type type, AsmPrinter &os) {
+static LogicalResult customTypePrinter(Type type, AsmPrinter &os,
+                                       bool includeConst) {
+  if (includeConst && isConst(type)) {
+    os << "const.";
+    includeConst = false;
+  }
+
   auto printWidthQualifier = [&](std::optional<int32_t> width) {
     if (width)
       os << '<' << *width << '>';
@@ -69,18 +75,18 @@ static LogicalResult customTypePrinter(Type type, AsmPrinter &os) {
                                 if (element.isFlip)
                                   os << " flip";
                                 os << ": ";
-                                printNestedType(element.type, os);
+                                printNestedType(element.type, os, includeConst);
                               });
         os << '>';
       })
       .Case<FVectorType>([&](auto vectorType) {
         os << "vector<";
-        printNestedType(vectorType.getElementType(), os);
+        printNestedType(vectorType.getElementType(), os, includeConst);
         os << ", " << vectorType.getNumElements() << '>';
       })
       .Case<RefType>([&](auto refType) {
         os << "ref<";
-        printNestedType(refType.getType(), os);
+        printNestedType(refType.getType(), os, includeConst);
         os << '>';
       })
       .Default([&](auto) { anyFailed = true; });
@@ -88,9 +94,10 @@ static LogicalResult customTypePrinter(Type type, AsmPrinter &os) {
 }
 
 /// Print a type defined by this dialect.
-void circt::firrtl::printNestedType(Type type, AsmPrinter &os) {
+void circt::firrtl::printNestedType(Type type, AsmPrinter &os,
+                                    bool includeConst) {
   // Try the custom type printer.
-  if (succeeded(customTypePrinter(type, os)))
+  if (succeeded(customTypePrinter(type, os, includeConst)))
     return;
 
   // None of the above recognized the type, so we bail.
@@ -120,18 +127,19 @@ void circt::firrtl::printNestedType(Type type, AsmPrinter &os) {
 ///   ::= analog ('<' int '>')?
 ///   ::= bundle '<' (bundle-elt (',' bundle-elt)*)? '>'
 ///   ::= vector '<' type ',' int '>'
+///   ::= const '.' type
 ///
 /// bundle-elt ::= identifier ':' type
 /// ```
 static OptionalParseResult customTypeParser(AsmParser &parser, StringRef name,
-                                            Type &result) {
+                                            Type &result, bool isConst) {
   auto *context = parser.getContext();
   if (name.equals("clock"))
-    return result = ClockType::get(context), success();
+    return result = ClockType::get(context, isConst), success();
   if (name.equals("reset"))
-    return result = ResetType::get(context), success();
+    return result = ResetType::get(context, isConst), success();
   if (name.equals("asyncreset"))
-    return result = AsyncResetType::get(context), success();
+    return result = AsyncResetType::get(context, isConst), success();
 
   if (name.equals("sint") || name.equals("uint") || name.equals("analog")) {
     // Parse the width specifier if it exists.
@@ -146,12 +154,12 @@ static OptionalParseResult customTypeParser(AsmParser &parser, StringRef name,
     }
 
     if (name.equals("sint"))
-      result = SIntType::get(context, width);
+      result = SIntType::get(context, width, isConst);
     else if (name.equals("uint"))
-      result = UIntType::get(context, width);
+      result = UIntType::get(context, width, isConst);
     else {
       assert(name.equals("analog"));
-      result = AnalogType::get(context, width);
+      result = AnalogType::get(context, width, isConst);
     }
     return success();
   }
@@ -179,7 +187,7 @@ static OptionalParseResult customTypeParser(AsmParser &parser, StringRef name,
       }
 
       bool isFlip = succeeded(parser.parseOptionalKeyword("flip"));
-      if (parser.parseColon() || parseNestedBaseType(type, parser))
+      if (parser.parseColon() || parseNestedBaseType(type, parser, isConst))
         return failure();
 
       elements.push_back({StringAttr::get(context, name), isFlip, type});
@@ -197,7 +205,8 @@ static OptionalParseResult customTypeParser(AsmParser &parser, StringRef name,
     FIRRTLBaseType elementType;
     uint64_t width = 0;
 
-    if (parser.parseLess() || parseNestedBaseType(elementType, parser) ||
+    if (parser.parseLess() ||
+        parseNestedBaseType(elementType, parser, isConst) ||
         parser.parseComma() || parser.parseInteger(width) ||
         parser.parseGreater())
       return failure();
@@ -207,6 +216,8 @@ static OptionalParseResult customTypeParser(AsmParser &parser, StringRef name,
 
   if (name.equals("ref")) {
     FIRRTLBaseType type;
+    // Don't pass `isConst` to `parseNestedBaseType since `ref` can point to
+    // either `const` or non-`const` types
     if (parser.parseLess() || parseNestedBaseType(type, parser) ||
         parser.parseGreater())
       return failure();
@@ -218,6 +229,16 @@ static OptionalParseResult customTypeParser(AsmParser &parser, StringRef name,
     return result = RefType::get(type), success();
   }
 
+  StringRef constPrefix = "const.";
+  if (name.starts_with(constPrefix)) {
+    if (isConst)
+      return parser.emitError(
+          parser.getNameLoc(),
+          "'const' can only be specified once the outermost 'const' type");
+    return customTypeParser(parser, name.drop_front(constPrefix.size()), result,
+                            true);
+  }
+
   return {};
 }
 
@@ -226,9 +247,11 @@ static OptionalParseResult customTypeParser(AsmParser &parser, StringRef name,
 /// This will first try the generated type parsers and then resort to the custom
 /// parser implementation. Emits an error and returns failure if `name` does not
 /// refer to a type defined in this dialect.
-static ParseResult parseType(Type &result, StringRef name, AsmParser &parser) {
+static ParseResult parseType(Type &result, StringRef name, AsmParser &parser,
+                             bool isConst = false) {
   // Try the custom type parser.
-  OptionalParseResult parseResult = customTypeParser(parser, name, result);
+  OptionalParseResult parseResult =
+      customTypeParser(parser, name, result, isConst);
   if (parseResult.has_value())
     return parseResult.value();
 
@@ -243,9 +266,9 @@ static ParseResult parseType(Type &result, StringRef name, AsmParser &parser) {
 /// Note that only a subset of types defined in the FIRRTL dialect inherit from
 /// `FIRRTLType`. Use `parseType` to parse *any* of the defined types.
 static ParseResult parseFIRRTLType(FIRRTLType &result, StringRef name,
-                                   AsmParser &parser) {
+                                   AsmParser &parser, bool isConst = false) {
   Type type;
-  if (failed(parseType(type, name, parser)))
+  if (failed(parseType(type, name, parser, isConst)))
     return failure();
   result = type.dyn_cast<FIRRTLType>();
   if (result)
@@ -256,9 +279,9 @@ static ParseResult parseFIRRTLType(FIRRTLType &result, StringRef name,
 }
 
 static ParseResult parseFIRRTLBaseType(FIRRTLBaseType &result, StringRef name,
-                                       AsmParser &parser) {
+                                       AsmParser &parser, bool isCont) {
   FIRRTLType type;
-  if (failed(parseFIRRTLType(type, name, parser)))
+  if (failed(parseFIRRTLType(type, name, parser, isCont)))
     return failure();
   if (auto base = type.dyn_cast<FIRRTLBaseType>()) {
     result = base;
@@ -281,11 +304,12 @@ ParseResult circt::firrtl::parseNestedType(FIRRTLType &result,
 }
 
 ParseResult circt::firrtl::parseNestedBaseType(FIRRTLBaseType &result,
-                                               AsmParser &parser) {
+                                               AsmParser &parser,
+                                               bool isConst) {
   StringRef name;
   if (parser.parseKeyword(&name))
     return failure();
-  return parseFIRRTLBaseType(result, name, parser);
+  return parseFIRRTLBaseType(result, name, parser, isConst);
 }
 
 //===---------------------------------------------------------------------===//
@@ -344,6 +368,24 @@ unsigned RecursiveTypeProperties::toFlags() const {
 // FIRRTLBaseType Implementation
 //===----------------------------------------------------------------------===//
 
+struct circt::firrtl::detail::FIRRTLBaseTypeStorage : mlir::TypeStorage {
+  // Use `char` instead of `bool` since llvm already provides a
+  // DenseMapInfo<char> specialization
+  using KeyTy = char;
+
+  FIRRTLBaseTypeStorage(bool isConst) : isConst(static_cast<char>(isConst)) {}
+
+  bool operator==(const KeyTy &key) const { return key == isConst; }
+
+  static FIRRTLBaseTypeStorage *construct(TypeStorageAllocator &allocator,
+                                          KeyTy key) {
+    return new (allocator.allocate<FIRRTLBaseTypeStorage>())
+        FIRRTLBaseTypeStorage(key);
+  }
+
+  char isConst;
+};
+
 /// Return true if this is a 'ground' type, aka a non-aggregate type.
 bool FIRRTLBaseType::isGround() {
   return TypeSwitch<FIRRTLBaseType, bool>(*this)
@@ -355,6 +397,8 @@ bool FIRRTLBaseType::isGround() {
         return false;
       });
 }
+
+bool FIRRTLBaseType::isConst() { return getImpl()->isConst; }
 
 /// Return a pair with the 'isPassive' and 'containsAnalog' bits.
 RecursiveTypeProperties FIRRTLBaseType::getRecursiveTypeProperties() {
@@ -389,6 +433,18 @@ FIRRTLBaseType FIRRTLBaseType::getPassiveType() {
           [](BundleType bundleType) { return bundleType.getPassiveType(); })
       .Case<FVectorType>(
           [](FVectorType vectorType) { return vectorType.getPassiveType(); })
+      .Default([](Type) {
+        llvm_unreachable("unknown FIRRTL type");
+        return FIRRTLBaseType();
+      });
+}
+
+/// Return a 'const' or non-'const' version of this type.
+FIRRTLBaseType FIRRTLBaseType::getConstType(bool isConst) {
+  return TypeSwitch<FIRRTLBaseType, FIRRTLBaseType>(*this)
+      .Case<ClockType, ResetType, AsyncResetType, AnalogType, SIntType,
+            UIntType, BundleType, FVectorType>(
+          [&](auto type) { return type.getConstType(isConst); })
       .Default([](Type) {
         llvm_unreachable("unknown FIRRTL type");
         return FIRRTLBaseType();
@@ -563,6 +619,10 @@ bool firrtl::areTypesEquivalent(FIRRTLType destFType, FIRRTLType srcFType) {
   if (!destType || !srcType)
     return destFType == srcFType;
 
+  // Type constness must match for equivalence
+  if (destType.isConst() != srcType.isConst())
+    return false;
+
   // Reset types can be driven by UInt<1>, AsyncReset, or Reset types.
   if (destType.isa<ResetType>())
     return srcType.isResetType();
@@ -613,6 +673,10 @@ bool firrtl::areTypesWeaklyEquivalent(FIRRTLType destFType, FIRRTLType srcFType,
   // For non-base types, only equivalent if identical.
   if (!destType || !srcType)
     return destFType == srcFType;
+
+  // Type constness must match for equivalence
+  if (destType.isConst() != srcType.isConst())
+    return false;
 
   // Reset types can be driven by UInt<1>, AsyncReset, or Reset types.
   if (destType.isa<ResetType>())
@@ -701,12 +765,13 @@ Type firrtl::getPassiveType(Type anyBaseFIRRTLType) {
 // IntType
 //===----------------------------------------------------------------------===//
 
-/// Return a SIntType or UInt type with the specified signedness and width.
+/// Return a SIntType or UIntType with the specified signedness, width, and
+/// constness
 IntType IntType::get(MLIRContext *context, bool isSigned,
-                     int32_t widthOrSentinel) {
+                     int32_t widthOrSentinel, bool isConst) {
   if (isSigned)
-    return SIntType::get(context, widthOrSentinel);
-  return UIntType::get(context, widthOrSentinel);
+    return SIntType::get(context, widthOrSentinel, isConst);
+  return UIntType::get(context, widthOrSentinel, isConst);
 }
 
 int32_t IntType::getWidthOrSentinel() {
@@ -718,52 +783,101 @@ int32_t IntType::getWidthOrSentinel() {
 }
 
 //===----------------------------------------------------------------------===//
+// WidthTypeStorage
+//===----------------------------------------------------------------------===//
+
+struct circt::firrtl::detail::WidthTypeStorage : detail::FIRRTLBaseTypeStorage {
+  WidthTypeStorage(int32_t width, bool isConst)
+      : FIRRTLBaseTypeStorage(isConst), width(width) {}
+  using KeyTy = std::pair<int32_t, char>;
+
+  bool operator==(const KeyTy &key) const {
+    return key == std::pair{width, isConst};
+  }
+
+  static WidthTypeStorage *construct(TypeStorageAllocator &allocator,
+                                     const KeyTy &key) {
+    return new (allocator.allocate<WidthTypeStorage>())
+        WidthTypeStorage(key.first, key.second);
+  }
+
+  int32_t width;
+};
+
+IntType IntType::getConstType(bool isConst) {
+  if (auto sIntType = dyn_cast<SIntType>())
+    return sIntType.getConstType(isConst);
+  return cast<UIntType>().getConstType(isConst);
+}
+
+//===----------------------------------------------------------------------===//
 // SIntType
 //===----------------------------------------------------------------------===//
 
-SIntType SIntType::get(MLIRContext *context) { return get(context, -1); }
+SIntType SIntType::get(MLIRContext *context) { return get(context, -1, false); }
 
-SIntType SIntType::get(MLIRContext *context, std::optional<int32_t> width) {
-  if (!width)
-    return get(context);
-  return get(context, *width);
+SIntType SIntType::get(MLIRContext *context, std::optional<int32_t> width,
+                       bool isConst) {
+  return get(context, width ? *width : -1, isConst);
 }
 
 LogicalResult SIntType::verify(function_ref<InFlightDiagnostic()> emitError,
-                               int32_t widthOrSentinel) {
+                               int32_t widthOrSentinel, bool isConst) {
   if (widthOrSentinel < -1)
     return emitError() << "invalid width";
   return success();
+}
+
+int32_t SIntType::getWidthOrSentinel() const { return getImpl()->width; }
+
+SIntType SIntType::getConstType(bool isConst) {
+  if (isConst == this->isConst())
+    return *this;
+  return get(getContext(), getWidthOrSentinel(), isConst);
 }
 
 //===----------------------------------------------------------------------===//
 // UIntType
 //===----------------------------------------------------------------------===//
 
-UIntType UIntType::get(MLIRContext *context) { return get(context, -1); }
+UIntType UIntType::get(MLIRContext *context) { return get(context, -1, false); }
 
-UIntType UIntType::get(MLIRContext *context, std::optional<int32_t> width) {
-  if (!width)
-    return get(context);
-  return get(context, *width);
+UIntType UIntType::get(MLIRContext *context, std::optional<int32_t> width,
+                       bool isConst) {
+  return get(context, width ? *width : -1, isConst);
 }
 
 LogicalResult UIntType::verify(function_ref<InFlightDiagnostic()> emitError,
-                               int32_t widthOrSentinel) {
+                               int32_t widthOrSentinel, bool isConst) {
   if (widthOrSentinel < -1)
     return emitError() << "invalid width";
   return success();
+}
+
+int32_t UIntType::getWidthOrSentinel() const { return getImpl()->width; }
+
+UIntType UIntType::getConstType(bool isConst) {
+  if (isConst == this->isConst())
+    return *this;
+  return get(getContext(), getWidthOrSentinel(), isConst);
 }
 
 //===----------------------------------------------------------------------===//
 // Bundle Type
 //===----------------------------------------------------------------------===//
 
-struct circt::firrtl::detail::BundleTypeStorage : mlir::TypeStorage {
+struct circt::firrtl::detail::BundleTypeStorage
+    : detail::FIRRTLBaseTypeStorage {
   using KeyTy = ArrayRef<BundleType::BundleElement>;
 
   BundleTypeStorage(KeyTy elements)
-      : elements(elements.begin(), elements.end()) {
+      : detail::FIRRTLBaseTypeStorage(
+            elements.empty() ? false
+                             : llvm::all_of(elements,
+                                            [](auto element) {
+                                              return element.type.isConst();
+                                            })),
+        elements(elements.begin(), elements.end()) {
     RecursiveTypeProperties props{true, false, false};
     uint64_t fieldID = 0;
     fieldIDs.reserve(elements.size());
@@ -837,6 +951,18 @@ FIRRTLBaseType BundleType::getPassiveType() {
   auto passiveType = BundleType::get(getContext(), newElements);
   impl->passiveContainsAnalogTypeInfo.setPointer(passiveType);
   return passiveType;
+}
+
+BundleType BundleType::getConstType(bool isConst) {
+  if (isConst == this->isConst())
+    return *this;
+  SmallVector<BundleType::BundleElement, 16> newElements;
+  newElements.reserve(getNumElements());
+  for (auto element : getElements()) {
+    element.type = element.type.getConstType(isConst);
+    newElements.push_back(element);
+  }
+  return get(getContext(), newElements);
 }
 
 std::optional<unsigned> BundleType::getElementIndex(StringAttr name) {
@@ -939,10 +1065,12 @@ std::pair<uint64_t, bool> BundleType::rootChildFieldID(uint64_t fieldID,
 // FVectorType
 //===----------------------------------------------------------------------===//
 
-struct circt::firrtl::detail::FVectorTypeStorage : mlir::TypeStorage {
+struct circt::firrtl::detail::FVectorTypeStorage
+    : detail::FIRRTLBaseTypeStorage {
   using KeyTy = std::pair<FIRRTLBaseType, size_t>;
 
-  FVectorTypeStorage(KeyTy value) : value(value) {
+  FVectorTypeStorage(KeyTy value)
+      : detail::FIRRTLBaseTypeStorage(value.first.isConst()), value(value) {
     auto properties = value.first.getRecursiveTypeProperties();
     passiveContainsAnalogTypeInfo.setInt(properties.toFlags());
   }
@@ -999,6 +1127,12 @@ FIRRTLBaseType FVectorType::getPassiveType() {
       FVectorType::get(getElementType().getPassiveType(), getNumElements());
   impl->passiveContainsAnalogTypeInfo.setPointer(passiveType);
   return passiveType;
+}
+
+FVectorType FVectorType::getConstType(bool isConst) {
+  if (isConst == this->isConst())
+    return *this;
+  return get(getElementType().getConstType(isConst), getNumElements());
 }
 
 uint64_t FVectorType::getFieldID(uint64_t index) {
@@ -1075,21 +1209,57 @@ auto RefType::verify(function_ref<InFlightDiagnostic()> emitErrorFn,
 //===----------------------------------------------------------------------===//
 
 AnalogType AnalogType::get(mlir::MLIRContext *context) {
-  return AnalogType::get(context, -1);
+  return AnalogType::get(context, -1, false);
 }
 
 AnalogType AnalogType::get(mlir::MLIRContext *context,
-                           std::optional<int32_t> width) {
-  if (!width)
-    return AnalogType::get(context);
-  return AnalogType::get(context, *width);
+                           std::optional<int32_t> width, bool isConst) {
+  return AnalogType::get(context, width ? *width : -1, isConst);
 }
 
 LogicalResult AnalogType::verify(function_ref<InFlightDiagnostic()> emitError,
-                                 int32_t widthOrSentinel) {
+                                 int32_t widthOrSentinel, bool isConst) {
   if (widthOrSentinel < -1)
     return emitError() << "invalid width";
   return success();
+}
+
+int32_t AnalogType::getWidthOrSentinel() const { return getImpl()->width; }
+
+AnalogType AnalogType::getConstType(bool isConst) {
+  if (isConst == this->isConst())
+    return *this;
+  return get(getContext(), getWidthOrSentinel(), isConst);
+}
+
+//===----------------------------------------------------------------------===//
+// ClockType
+//===----------------------------------------------------------------------===//
+
+ClockType ClockType::getConstType(bool isConst) {
+  if (isConst == this->isConst())
+    return *this;
+  return get(getContext(), isConst);
+}
+
+//===----------------------------------------------------------------------===//
+// ResetType
+//===----------------------------------------------------------------------===//
+
+ResetType ResetType::getConstType(bool isConst) {
+  if (isConst == this->isConst())
+    return *this;
+  return get(getContext(), isConst);
+}
+
+//===----------------------------------------------------------------------===//
+// AsyncResetType
+//===----------------------------------------------------------------------===//
+
+AsyncResetType AsyncResetType::getConstType(bool isConst) {
+  if (isConst == this->isConst())
+    return *this;
+  return get(getContext(), isConst);
 }
 
 //===----------------------------------------------------------------------===//
