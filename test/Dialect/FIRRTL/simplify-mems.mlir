@@ -157,8 +157,8 @@ firrtl.circuit "UnusedPorts" {
         !firrtl.bundle<addr: uint<4>, en: uint<1>, clk: clock, data: uint<42>, mask: uint<1>>,
         !firrtl.bundle<addr: uint<4>, en: uint<1>, clk: clock, rdata flip: uint<42>, wmode: uint<1>, wdata: uint<42>, wmask: uint<1>>
 
-    // CHECK: [[REG1:%.+]] = firrtl.reg %c0_clock : !firrtl.uint<42>
-    // CHECK: [[REG2:%.+]] = firrtl.reg %c0_clock : !firrtl.uint<42>
+    // CHECK: [[REG1:%.+]] = firrtl.reg %c0_clock : !firrtl.clock, !firrtl.uint<42>
+    // CHECK: [[REG2:%.+]] = firrtl.reg %c0_clock : !firrtl.clock, !firrtl.uint<42>
     // CHECK: firrtl.strictconnect %result_read, [[REG1]] : !firrtl.uint<42>
     %read_addr = firrtl.subfield %Memory_read[addr] : !firrtl.bundle<addr: uint<4>, en: uint<1>, clk: clock, data flip: uint<42>>
     firrtl.connect %read_addr, %addr : !firrtl.uint<4>, !firrtl.uint<4>
