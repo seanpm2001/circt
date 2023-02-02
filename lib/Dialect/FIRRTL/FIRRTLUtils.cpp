@@ -770,3 +770,17 @@ Type circt::firrtl::lowerType(Type type) {
 
   return {};
 }
+
+void circt::firrtl::replaceOpAndCopyName(PatternRewriter &rewriter,
+                                         Operation *op, Value newValue) {
+  if (auto *newOp = newValue.getDefiningOp()) {
+    auto name = op->getAttrOfType<StringAttr>("name");
+    if (name && !name.getValue().empty()) {
+      auto newOpName = newOp->getAttrOfType<StringAttr>("name");
+      if (!newOpName || isUselessName(newOpName))
+        rewriter.updateRootInPlace(newOp,
+                                   [&] { newOp->setAttr("name", name); });
+    }
+  }
+  rewriter.replaceOp(op, newValue);
+}

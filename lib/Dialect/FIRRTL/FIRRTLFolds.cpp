@@ -83,40 +83,6 @@ static bool isUInt1(Type type) {
   return true;
 }
 
-/// A wrapper of `PatternRewriter::replaceOp` to propagate "name" attribute.
-/// If a replaced op has a "name" attribute, this function propagates the name
-/// to the new value.
-static void replaceOpAndCopyName(PatternRewriter &rewriter, Operation *op,
-                                 Value newValue) {
-  if (auto *newOp = newValue.getDefiningOp()) {
-    auto name = op->getAttrOfType<StringAttr>("name");
-    if (name && !name.getValue().empty()) {
-      auto newOpName = newOp->getAttrOfType<StringAttr>("name");
-      if (!newOpName || isUselessName(newOpName))
-        rewriter.updateRootInPlace(newOp,
-                                   [&] { newOp->setAttr("name", name); });
-    }
-  }
-  rewriter.replaceOp(op, newValue);
-}
-
-/// A wrapper of `PatternRewriter::replaceOpWithNewOp` to propagate "name"
-/// attribute. If a replaced op has a "name" attribute, this function propagates
-/// the name to the new value.
-template <typename OpTy, typename... Args>
-static OpTy replaceOpWithNewOpAndCopyName(PatternRewriter &rewriter,
-                                          Operation *op, Args &&...args) {
-  auto name = op->getAttrOfType<StringAttr>("name");
-  auto newOp =
-      rewriter.replaceOpWithNewOp<OpTy>(op, std::forward<Args>(args)...);
-  if (name && !name.getValue().empty()) {
-    auto newOpName = newOp->template getAttrOfType<StringAttr>("name");
-    if (!newOpName || isUselessName(newOpName))
-      rewriter.updateRootInPlace(newOp, [&] { newOp->setAttr("name", name); });
-  }
-  return newOp;
-}
-
 /// Return true if this is a useless temporary name produced by FIRRTL.  We
 /// drop these as they don't convey semantic meaning.
 bool circt::firrtl::isUselessName(StringRef name) {
@@ -1880,10 +1846,37 @@ static Attribute collectFields(MLIRContext *context,
 }
 
 OpFoldResult BundleCreateOp::fold(FoldAdaptor adaptor) {
+  if (SubfieldOp first = getOperand(0).getDefiningOp<SubfieldOp>()) {
+    if (first.getFieldIndex() == 0 && first.getInput().getType() == getType() &&
+        !getType().hasUninferredWidth() &&
+        llvm::all_of(
+            llvm::enumerate(getOperands().drop_front()), [&](auto elem) {
+              auto index = elem.index() + 1;
+              auto subindex = elem.value().template getDefiningOp<SubfieldOp>();
+              return subindex && subindex.getInput() == first.getInput() &&
+                     subindex.getFieldIndex() == index;
+            })) {
+      return first.getInput();
+    }
+  }
   return collectFields(getContext(), adaptor.getOperands());
 }
 
 OpFoldResult VectorCreateOp::fold(FoldAdaptor adaptor) {
+  if (SubindexOp first = getOperand(0).getDefiningOp<SubindexOp>()) {
+    if (first.getIndex() == 0 && first.getInput().getType() == getType() &&
+        !getType().hasUninferredWidth() &&
+        llvm::all_of(
+            llvm::enumerate(getOperands().drop_front()), [&](auto elem) {
+              auto index = elem.index() + 1;
+              auto subindex = elem.value().template getDefiningOp<SubindexOp>();
+              return subindex && subindex.getInput() == first.getInput() &&
+                     subindex.getIndex() == index;
+            })) {
+      return first.getInput();
+    }
+  }
+
   return collectFields(getContext(), adaptor.getOperands());
 }
 

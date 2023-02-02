@@ -16,6 +16,8 @@
 #include "circt/Dialect/FIRRTL/FIRRTLOps.h"
 #include "circt/Dialect/FIRRTL/Namespace.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Matchers.h"
+#include "mlir/IR/PatternMatch.h"
 #include "llvm/Support/Parallel.h"
 
 namespace circt {
@@ -192,6 +194,29 @@ static ResultTy transformReduce(MLIRContext *context, RangeTy &&r,
                                 TransformFuncTy transform) {
   return transformReduce(context, std::begin(r), std::end(r), init, reduce,
                          transform);
+}
+
+/// A wrapper of `PatternRewriter::replaceOp` to propagate "name" attribute.
+/// If a replaced op has a "name" attribute, this function propagates the name
+/// to the new value.
+void replaceOpAndCopyName(PatternRewriter &rewriter, Operation *op,
+                          Value newValue);
+
+/// A wrapper of `PatternRewriter::replaceOpWithNewOp` to propagate "name"
+/// attribute. If a replaced op has a "name" attribute, this function propagates
+/// the name to the new value.
+template <typename OpTy, typename... Args>
+static OpTy replaceOpWithNewOpAndCopyName(PatternRewriter &rewriter,
+                                          Operation *op, Args &&...args) {
+  auto name = op->getAttrOfType<StringAttr>("name");
+  auto newOp =
+      rewriter.replaceOpWithNewOp<OpTy>(op, std::forward<Args>(args)...);
+  if (name && !name.getValue().empty()) {
+    auto newOpName = newOp->template getAttrOfType<StringAttr>("name");
+    if (!newOpName || isUselessName(newOpName))
+      rewriter.updateRootInPlace(newOp, [&] { newOp->setAttr("name", name); });
+  }
+  return newOp;
 }
 
 } // namespace firrtl
