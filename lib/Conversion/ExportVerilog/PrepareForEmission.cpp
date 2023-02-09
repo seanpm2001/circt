@@ -931,6 +931,32 @@ static LogicalResult legalizeHWModule(Block &block,
     lowerUsersToTemporaryWire(op,
                               /*emitWireAtBlockBegin=*/true);
   }
+
+  for (auto &op : llvm::make_early_inc_range(block)) {
+    auto assign = dyn_cast<AssignOp>(op);
+    if (!assign)
+      continue;
+    auto src = assign.getSrc().getDefiningOp<hw::ArrayCreateOp>();
+    auto dest = assign.getDest();
+
+    if (!src)
+      continue;
+
+    ImplicitLocOpBuilder builder(op.getLoc(), assign);
+
+    for (auto op : llvm::enumerate(llvm::reverse(src.getOperands()))) {
+      auto index = builder.create<hw::ConstantOp>(APInt(
+          llvm::Log2_64_Ceil(src.getType().cast<hw::ArrayType>().getSize()),
+          op.index()));
+      auto inout = builder.create<sv::ArrayIndexInOutOp>(dest, index);
+      builder.create<sv::AssignOp>(inout, op.value());
+    }
+
+    assign.erase();
+    if (src.use_empty())
+      src.erase();
+  }
+
   return success();
 }
 

@@ -601,7 +601,7 @@ static bool isExpressionUnableToInline(Operation *op,
 
   // StructCreateOp needs to be assigning to a named temporary so that types
   // are inferred properly by verilog
-  if (isa<StructCreateOp>(op))
+  if (isa<StructCreateOp, ArrayCreateOp>(op))
     return true;
 
   // Aggregate literal syntax only works in an assignment expression, where
@@ -4368,6 +4368,11 @@ LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
     ps.invokeWithStringOS(
         [&](auto &os) { emitter.printUnpackedTypePostfix(type, os); });
 
+    if (isa<WireOp>(op) &&
+        isa<hw::ArrayType>(cast<hw::InOutType>(type).getElementType())) {
+      ps << "/* verilator split_var */";
+    }
+
     // Print debug info.
     if (state.options.printDebugInfo) {
       StringAttr sym = op->getAttr("inner_sym").dyn_cast_or_null<StringAttr>();
@@ -4798,6 +4803,8 @@ void ModuleEmitter::emitHWModule(HWModuleOp module) {
       // Emit array dimensions.
       ps.invokeWithStringOS(
           [&](auto &os) { printUnpackedTypePostfix(portType, os); });
+      if (isa<hw::ArrayType>(portType))
+        ps << "/* verilator split_var */ ";
 
       // Emit the symbol.
       if (state.options.printDebugInfo && portInfo[portIdx].sym &&
