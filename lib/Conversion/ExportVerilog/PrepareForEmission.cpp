@@ -932,6 +932,10 @@ static LogicalResult legalizeHWModule(Block &block,
                               /*emitWireAtBlockBegin=*/true);
   }
 
+  return success();
+}
+
+static void recurse(Block &block) {
   for (auto &op : llvm::make_early_inc_range(block)) {
     auto assign = dyn_cast<AssignOp>(op);
     if (!assign)
@@ -943,6 +947,7 @@ static LogicalResult legalizeHWModule(Block &block,
       continue;
 
     ImplicitLocOpBuilder builder(op.getLoc(), assign);
+    builder.setInsertionPointAfter(assign);
 
     for (auto op : llvm::enumerate(llvm::reverse(src.getOperands()))) {
       auto index = builder.create<hw::ConstantOp>(APInt(
@@ -956,10 +961,7 @@ static LogicalResult legalizeHWModule(Block &block,
     if (src.use_empty())
       src.erase();
   }
-
-  return success();
 }
-
 // NOLINTNEXTLINE(misc-no-recursion)
 LogicalResult ExportVerilog::prepareHWModule(hw::HWModuleOp module,
                                              const LoweringOptions &options) {
@@ -973,6 +975,8 @@ LogicalResult ExportVerilog::prepareHWModule(hw::HWModuleOp module,
   EmittedExpressionStateManager expressionStateManager(options);
   // Spill wires to prettify verilog outputs.
   prettifyAfterLegalization(*module.getBodyBlock(), expressionStateManager);
+  // assign, array_create
+  recurse(*module.getBodyBlock());
   return success();
 }
 

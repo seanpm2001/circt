@@ -4856,6 +4856,9 @@ void ModuleEmitter::emitHWModule(HWModuleOp module) {
             printUnpackedTypePostfix(portInfo[portIdx].type, os);
           });
 
+          if (isa<hw::ArrayType>(portInfo[portIdx].type))
+            ps << "/* verilator split_var */ ";
+
           // Emit the symbol.
           if (state.options.printDebugInfo && portInfo[portIdx].sym &&
               !portInfo[portIdx].sym.empty())
