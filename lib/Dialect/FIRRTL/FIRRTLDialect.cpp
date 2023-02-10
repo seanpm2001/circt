@@ -174,11 +174,30 @@ struct FoldConst
     return success();
   }
 };
+
+struct FixupConstant
+    : public mlir::OpTraitRewritePattern<mlir::OpTrait::ConstantLike> {
+  FixupConstant(MLIRContext *context)
+      : OpTraitRewritePattern<mlir::OpTrait::ConstantLike>(context) {}
+
+  LogicalResult matchAndRewrite(Operation *op,
+                                PatternRewriter &rewriter) const override {
+    auto resultType = op->getResultTypes()[0].dyn_cast<FIRRTLBaseType>();
+    if (!resultType || resultType.isConst())
+      return failure();
+
+    auto *constantOp = op->getDialect()->materializeConstant(
+        rewriter, op->getAttrs()[0].getValue(), resultType.getConstType(true),
+        op->getLoc());
+    rewriter.replaceOp(op, constantOp->getResult(0));
+    return success();
+  }
+};
 } // namespace
 
 void FIRRTLDialect::getCanonicalizationPatterns(
     RewritePatternSet &results) const {
-  results.add<ReinferResultTypes, FoldConst>(getContext());
+  results.add<ReinferResultTypes, FoldConst, FixupConstant>(getContext());
 }
 
 // Provide implementations for the enums we use.

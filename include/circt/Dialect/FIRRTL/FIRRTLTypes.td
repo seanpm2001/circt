@@ -107,6 +107,11 @@ def RWProbe : FIRRTLDialectType<
 def ConnectableType : AnyTypeOf<[FIRRTLBaseType, ForeignType]>;
 def StrictConnectableType : AnyTypeOf<[PassiveType, ForeignType]>;
 
+class ConstType<Type t> : FIRRTLDialectType<
+  And<[t.predicate,
+       CPred<"$_self.isa<FIRRTLBaseType>() && $_self.cast<FIRRTLBaseType>().isConst()">]>,
+  "a const base type", t.cppClassName>;
+
 //===----------------------------------------------------------------------===//
 // Sized and Unsized Integers
 //===----------------------------------------------------------------------===//
