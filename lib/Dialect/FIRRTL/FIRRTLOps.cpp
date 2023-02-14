@@ -2800,7 +2800,8 @@ static bool isSameIntTypeKind(Type lhs, Type rhs, int32_t &lhsWidth,
   // Must have two integer types with the same signedness.
   auto lhsi = lhs.dyn_cast<IntType>();
   auto rhsi = rhs.dyn_cast<IntType>();
-  if (!lhsi || !rhsi || lhsi.isSigned() != rhsi.isSigned()) {
+  if (!lhsi || !rhsi || lhsi.isSigned() != rhsi.isSigned() ||
+      lhsi.isConst() != rhsi.isConst()) {
     if (loc) {
       if (lhsi && !rhsi)
         mlir::emitError(*loc, "second operand must be an integer type, not ")
@@ -2811,8 +2812,10 @@ static bool isSameIntTypeKind(Type lhs, Type rhs, int32_t &lhsWidth,
       else if (!lhsi && !rhsi)
         mlir::emitError(*loc, "operands must be integer types, not ")
             << lhs << " and " << rhs;
-      else
+      else if (lhsi.isSigned() != rhsi.isSigned())
         mlir::emitError(*loc, "operand signedness must match");
+      else
+        mlir::emitError(*loc, "operand constness must match");
     }
     return false;
   }
@@ -2849,7 +2852,8 @@ FIRRTLType impl::inferAddSubResult(FIRRTLType lhs, FIRRTLType rhs,
 
   if (lhsWidth != -1 && rhsWidth != -1)
     resultWidth = std::max(lhsWidth, rhsWidth) + 1;
-  return IntType::get(lhs.getContext(), lhs.isa<SIntType>(), resultWidth);
+  return IntType::get(lhs.getContext(), lhs.isa<SIntType>(), resultWidth,
+                      isConst(lhs));
 }
 
 FIRRTLType MulPrimOp::inferBinaryReturnType(FIRRTLType lhs, FIRRTLType rhs,
@@ -2861,7 +2865,8 @@ FIRRTLType MulPrimOp::inferBinaryReturnType(FIRRTLType lhs, FIRRTLType rhs,
   if (lhsWidth != -1 && rhsWidth != -1)
     resultWidth = lhsWidth + rhsWidth;
 
-  return IntType::get(lhs.getContext(), lhs.isa<SIntType>(), resultWidth);
+  return IntType::get(lhs.getContext(), lhs.isa<SIntType>(), resultWidth,
+                      isConst(lhs));
 }
 
 FIRRTLType DivPrimOp::inferBinaryReturnType(FIRRTLType lhs, FIRRTLType rhs,
@@ -2872,11 +2877,11 @@ FIRRTLType DivPrimOp::inferBinaryReturnType(FIRRTLType lhs, FIRRTLType rhs,
 
   // For unsigned, the width is the width of the numerator on the LHS.
   if (lhs.isa<UIntType>())
-    return UIntType::get(lhs.getContext(), lhsWidth);
+    return UIntType::get(lhs.getContext(), lhsWidth, isConst(lhs));
 
   // For signed, the width is the width of the numerator on the LHS, plus 1.
   int32_t resultWidth = lhsWidth != -1 ? lhsWidth + 1 : -1;
-  return SIntType::get(lhs.getContext(), resultWidth);
+  return SIntType::get(lhs.getContext(), resultWidth, isConst(lhs));
 }
 
 FIRRTLType RemPrimOp::inferBinaryReturnType(FIRRTLType lhs, FIRRTLType rhs,
@@ -2887,7 +2892,8 @@ FIRRTLType RemPrimOp::inferBinaryReturnType(FIRRTLType lhs, FIRRTLType rhs,
 
   if (lhsWidth != -1 && rhsWidth != -1)
     resultWidth = std::min(lhsWidth, rhsWidth);
-  return IntType::get(lhs.getContext(), lhs.isa<SIntType>(), resultWidth);
+  return IntType::get(lhs.getContext(), lhs.isa<SIntType>(), resultWidth,
+                      isConst(lhs));
 }
 
 FIRRTLType impl::inferBitwiseResult(FIRRTLType lhs, FIRRTLType rhs,
@@ -2898,12 +2904,12 @@ FIRRTLType impl::inferBitwiseResult(FIRRTLType lhs, FIRRTLType rhs,
 
   if (lhsWidth != -1 && rhsWidth != -1)
     resultWidth = std::max(lhsWidth, rhsWidth);
-  return UIntType::get(lhs.getContext(), resultWidth);
+  return UIntType::get(lhs.getContext(), resultWidth, isConst(lhs));
 }
 
 FIRRTLType impl::inferComparisonResult(FIRRTLType lhs, FIRRTLType rhs,
                                        std::optional<Location> loc) {
-  return UIntType::get(lhs.getContext(), 1);
+  return UIntType::get(lhs.getContext(), 1, isConst(lhs));
 }
 
 FIRRTLType CatPrimOp::inferBinaryReturnType(FIRRTLType lhs, FIRRTLType rhs,
@@ -2914,7 +2920,7 @@ FIRRTLType CatPrimOp::inferBinaryReturnType(FIRRTLType lhs, FIRRTLType rhs,
 
   if (lhsWidth != -1 && rhsWidth != -1)
     resultWidth = lhsWidth + rhsWidth;
-  return UIntType::get(lhs.getContext(), resultWidth);
+  return UIntType::get(lhs.getContext(), resultWidth, isConst(lhs));
 }
 
 FIRRTLType DShlPrimOp::inferBinaryReturnType(FIRRTLType lhs, FIRRTLType rhs,
@@ -2950,7 +2956,7 @@ FIRRTLType DShlPrimOp::inferBinaryReturnType(FIRRTLType lhs, FIRRTLType rhs,
     }
     width = newWidth;
   }
-  return IntType::get(lhs.getContext(), lhsi.isSigned(), width);
+  return IntType::get(lhs.getContext(), lhsi.isSigned(), width, isConst(lhs));
 }
 
 FIRRTLType DShlwPrimOp::inferBinaryReturnType(FIRRTLType lhs, FIRRTLType rhs,
@@ -3009,7 +3015,7 @@ FIRRTLType AsSIntPrimOp::inferUnaryReturnType(FIRRTLType input,
       mlir::emitError(*loc, "operand must be a scalar type");
     return {};
   }
-  return SIntType::get(input.getContext(), width);
+  return SIntType::get(input.getContext(), width, base.isConst());
 }
 
 FIRRTLType AsUIntPrimOp::inferUnaryReturnType(FIRRTLType input,
@@ -3026,7 +3032,7 @@ FIRRTLType AsUIntPrimOp::inferUnaryReturnType(FIRRTLType input,
       mlir::emitError(*loc, "operand must be a scalar type");
     return {};
   }
-  return UIntType::get(input.getContext(), width);
+  return UIntType::get(input.getContext(), width, base.isConst());
 }
 
 FIRRTLType
@@ -3044,12 +3050,12 @@ AsAsyncResetPrimOp::inferUnaryReturnType(FIRRTLType input,
       mlir::emitError(*loc, "operand must be single bit scalar type");
     return {};
   }
-  return AsyncResetType::get(input.getContext());
+  return AsyncResetType::get(input.getContext(), base.isConst());
 }
 
 FIRRTLType AsClockPrimOp::inferUnaryReturnType(FIRRTLType input,
                                                std::optional<Location> loc) {
-  return ClockType::get(input.getContext());
+  return ClockType::get(input.getContext(), isConst(input));
 }
 
 FIRRTLType CvtPrimOp::inferUnaryReturnType(FIRRTLType input,
@@ -3058,7 +3064,7 @@ FIRRTLType CvtPrimOp::inferUnaryReturnType(FIRRTLType input,
     auto width = uiType.getWidthOrSentinel();
     if (width != -1)
       ++width;
-    return SIntType::get(input.getContext(), width);
+    return SIntType::get(input.getContext(), width, uiType.isConst());
   }
 
   if (input.isa<SIntType>())
@@ -3081,7 +3087,7 @@ FIRRTLType NegPrimOp::inferUnaryReturnType(FIRRTLType input,
   int32_t width = inputi.getWidthOrSentinel();
   if (width != -1)
     ++width;
-  return SIntType::get(input.getContext(), width);
+  return SIntType::get(input.getContext(), width, inputi.isConst());
 }
 
 FIRRTLType NotPrimOp::inferUnaryReturnType(FIRRTLType input,
@@ -3093,12 +3099,13 @@ FIRRTLType NotPrimOp::inferUnaryReturnType(FIRRTLType input,
 
     return {};
   }
-  return UIntType::get(input.getContext(), inputi.getWidthOrSentinel());
+  return UIntType::get(input.getContext(), inputi.getWidthOrSentinel(),
+                       inputi.isConst());
 }
 
 FIRRTLType impl::inferReductionResult(FIRRTLType input,
                                       std::optional<Location> loc) {
-  return UIntType::get(input.getContext(), 1);
+  return UIntType::get(input.getContext(), 1, isConst(input));
 }
 
 //===----------------------------------------------------------------------===//
@@ -3156,7 +3163,7 @@ FIRRTLType BitsPrimOp::inferReturnType(ValueRange operands,
     return {};
   }
 
-  return UIntType::get(input.getContext(), high - low + 1);
+  return UIntType::get(input.getContext(), high - low + 1, inputi.isConst());
 }
 
 LogicalResult impl::validateOneOperandOneConst(ValueRange operands,
@@ -3190,7 +3197,7 @@ FIRRTLType HeadPrimOp::inferReturnType(ValueRange operands,
     return {};
   }
 
-  return UIntType::get(input.getContext(), amount);
+  return UIntType::get(input.getContext(), amount, inputi.isConst());
 }
 
 LogicalResult MuxPrimOp::validateArguments(ValueRange operands,
@@ -3332,7 +3339,8 @@ FIRRTLType PadPrimOp::inferReturnType(ValueRange operands,
     return inputi;
 
   width = std::max<int32_t>(width, amount);
-  return IntType::get(input.getContext(), inputi.isSigned(), width);
+  return IntType::get(input.getContext(), inputi.isSigned(), width,
+                      inputi.isConst());
 }
 
 FIRRTLType ShlPrimOp::inferReturnType(ValueRange operands,
@@ -3353,7 +3361,8 @@ FIRRTLType ShlPrimOp::inferReturnType(ValueRange operands,
   if (width != -1)
     width += amount;
 
-  return IntType::get(input.getContext(), inputi.isSigned(), width);
+  return IntType::get(input.getContext(), inputi.isSigned(), width,
+                      inputi.isConst());
 }
 
 FIRRTLType ShrPrimOp::inferReturnType(ValueRange operands,
@@ -3374,7 +3383,8 @@ FIRRTLType ShrPrimOp::inferReturnType(ValueRange operands,
   if (width != -1)
     width = std::max<int32_t>(1, width - amount);
 
-  return IntType::get(input.getContext(), inputi.isSigned(), width);
+  return IntType::get(input.getContext(), inputi.isSigned(), width,
+                      inputi.isConst());
 }
 
 FIRRTLType TailPrimOp::inferReturnType(ValueRange operands,
@@ -3402,7 +3412,7 @@ FIRRTLType TailPrimOp::inferReturnType(ValueRange operands,
     width -= amount;
   }
 
-  return IntType::get(input.getContext(), false, width);
+  return IntType::get(input.getContext(), false, width, inputi.isConst());
 }
 
 //===----------------------------------------------------------------------===//
