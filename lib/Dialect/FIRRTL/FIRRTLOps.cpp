@@ -3533,6 +3533,10 @@ LogicalResult BitCastOp::verify() {
          << getType();
 }
 
+void ConstCastOp::getAsmResultNames(OpAsmSetValueNameFn setNameFn) {
+  setNameFn(getResult(), "cc");
+}
+
 //===----------------------------------------------------------------------===//
 // Custom attr-dict Directive that Elides Annotations
 //===----------------------------------------------------------------------===//
