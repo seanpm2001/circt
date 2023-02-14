@@ -15,6 +15,7 @@
 #include "circt/Dialect/FIRRTL/FIRRTLOps.h"
 #include "circt/Support/FieldRef.h"
 #include "mlir/IR/DialectImplementation.h"
+#include "mlir/IR/PatternMatch.h"
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -83,6 +84,73 @@ Operation *FIRRTLDialect::materializeConstant(OpBuilder &builder,
   }
 
   return nullptr;
+}
+
+namespace {
+struct ConvertToConst
+    : public mlir::OpInterfaceRewritePattern<mlir::InferTypeOpInterface> {
+  ConvertToConst(MLIRContext *context)
+      : OpInterfaceRewritePattern<mlir::InferTypeOpInterface>(context) {}
+
+  LogicalResult matchAndRewrite(mlir::InferTypeOpInterface op,
+                                PatternRewriter &rewriter) const override {
+    SmallVector<Value> constOperands;
+    constOperands.reserve(op->getNumOperands());
+    for (auto operand : op->getOperands()) {
+      if (auto *definingOp = operand.getDefiningOp()) {
+        if (auto constCastOp = dyn_cast<ConstCastOp>(definingOp)) {
+          constOperands.push_back(constCastOp.getInput());
+          continue;
+        }
+      }
+      return failure();
+    }
+
+    SmallVector<Type> inferredResultTypes;
+    if (failed(op.inferReturnTypes(op->getContext(), op->getLoc(),
+                                   constOperands, op->getAttrDictionary(),
+                                   op->getRegions(), inferredResultTypes))) {
+      return failure();
+    }
+
+    bool anyChanged = false;
+    for (size_t i = 0, e = inferredResultTypes.size(); i != e; ++i) {
+      auto result = op->getResult(i);
+      auto inferredType = inferredResultTypes[i];
+      if (result.getType() != inferredType) {
+        anyChanged = true;
+        break;
+      }
+    }
+
+    if (!anyChanged)
+      return failure();
+
+    rewriter.setInsertionPointAfter(op);
+
+    auto *constOp =
+        rewriter.create(op->getLoc(), op->getName().getIdentifier(),
+                        constOperands, inferredResultTypes, op->getAttrs());
+    SmallVector<Value> nonConstResults;
+    nonConstResults.reserve(op->getNumResults());
+    for (auto result : constOp->getResults()) {
+      if (isConst(result.getType())) {
+        auto constCastOp = rewriter.create<ConstCastOp>(op.getLoc(), result);
+        nonConstResults.push_back(constCastOp.getResult());
+      } else {
+        nonConstResults.push_back(result);
+      }
+    }
+
+    rewriter.replaceOp(op, nonConstResults);
+    return success();
+  }
+};
+} // namespace
+
+void FIRRTLDialect::getCanonicalizationPatterns(
+    RewritePatternSet &results) const {
+  results.add<ConvertToConst>(getContext());
 }
 
 // Provide implementations for the enums we use.
