@@ -1,4 +1,4 @@
-// RUN: circt-opt --pass-pipeline='builtin.module(firrtl.circuit(firrtl.module(firrtl-expand-whens)))' %s | FileCheck %s
+// RUN: circt-opt --pass-pipeline='builtin.module(firrtl.circuit(firrtl.module(firrtl-expand-whens)))' -verify-diagnostics %s | FileCheck %s
 firrtl.circuit "ExpandWhens" {
 firrtl.module @ExpandWhens () {}
 
@@ -529,5 +529,30 @@ firrtl.module @aggregate_regreset(in %clock: !firrtl.clock, in %reset: !firrtl.u
   // CHECK-NEXT: firrtl.connect %1, %1
   // CHECK-NEXT: %2 = firrtl.subindex %0[1]
   // CHECK-NEXT: firrtl.connect %2, %2
+}
+
+// Const connections can occur within const-conditioned whens
+// CHECK-LABEL: @ConstConditionConstConnection
+firrtl.module @ConstConditionConstConnection(in %cond: !firrtl.const.uint<1>, in %in1: !firrtl.const.sint<2>, in %in2: !firrtl.const.sint<2>, out %out: !firrtl.const.sint<2>) {
+  firrtl.when %cond : !firrtl.const.uint<1> {
+    firrtl.connect %out, %in1 : !firrtl.const.sint<2>, !firrtl.const.sint<2>
+  } else {
+    firrtl.connect %out, %in2 : !firrtl.const.sint<2>, !firrtl.const.sint<2>
+  }
+  // CHECK:      [[MUX:%.+]] = firrtl.mux(%cond, %in1, %in2) : (!firrtl.const.uint<1>, !firrtl.const.sint<2>, !firrtl.const.sint<2>) -> !firrtl.const.sint<2>
+  // CHECK-NEXT: firrtl.connect %out, [[MUX]] : !firrtl.const.sint<2>, !firrtl.const.sint<2>
+}
+
+// Non-const connections can occur within const-conditioned whens
+// CHECK-LABEL: @ConstConditionNonConstConnection
+firrtl.module @ConstConditionNonConstConnection(in %cond: !firrtl.const.uint<1>, in %in1: !firrtl.sint<2>, in %in2: !firrtl.sint<2>, out %out: !firrtl.sint<2>) {
+  firrtl.when %cond : !firrtl.const.uint<1> {
+    firrtl.connect %out, %in1 : !firrtl.sint<2>, !firrtl.sint<2>
+  } else {
+    firrtl.connect %out, %in2 : !firrtl.sint<2>, !firrtl.sint<2>
+  }
+  // CHECK:      [[COND:%.+]] = firrtl.constcast %cond : !firrtl.const.uint<1>
+  // CHECK:      [[MUX:%.+]] = firrtl.mux([[COND]], %in1, %in2) : (!firrtl.uint<1>, !firrtl.sint<2>, !firrtl.sint<2>) -> !firrtl.sint<2>
+  // CHECK-NEXT: firrtl.connect %out, [[MUX]] : !firrtl.sint<2>, !firrtl.sint<2>
 }
 }

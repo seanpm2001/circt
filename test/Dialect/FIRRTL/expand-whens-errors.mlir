@@ -135,3 +135,18 @@ firrtl.module @CheckInitialization(in %p : !firrtl.uint<1>, out %out: !firrtl.ve
   // expected-error @above {{port "out[0].b" not fully initialized in module "CheckInitialization"}}
 }
 }
+
+// -----
+
+firrtl.circuit "CheckConstInitInNonConstCondition" {
+firrtl.module @CheckConstInitInNonConstCondition(in %p: !firrtl.uint<1>, in %in: !firrtl.const.uint<2>, out %out: !firrtl.const.uint<2>) {
+  // expected-error @+1 {{type mismatch between destination '!firrtl.const.uint<2>' and source '!firrtl.uint<2>'}}
+  firrtl.when %p : !firrtl.uint<1> {
+    // expected-error @+1 {{'const' sink "out" initialization is dependent on a non-'const' condition}}
+    firrtl.connect %out, %in : !firrtl.const.uint<2>, !firrtl.const.uint<2>
+  } else {
+    // expected-error @+1 {{'const' sink "out" initialization is dependent on a non-'const' condition}}
+    firrtl.connect %out, %in : !firrtl.const.uint<2>, !firrtl.const.uint<2>
+  }
+}
+}

@@ -124,9 +124,13 @@ protected:
   /// the current scope. This is used for resolving last connect semantics, and
   /// for retrieving the responsible connect operation.
   ScopedDriverMap &driverMap;
+  bool isWithinNonconstCondition;
 
 public:
-  LastConnectResolver(ScopedDriverMap &driverMap) : driverMap(driverMap) {}
+  LastConnectResolver(ScopedDriverMap &driverMap,
+                      bool isWithinNonconstCondition = false)
+      : driverMap(driverMap),
+        isWithinNonconstCondition(isWithinNonconstCondition) {}
 
   using FIRRTLVisitor<ConcreteT>::visitExpr;
   using FIRRTLVisitor<ConcreteT>::visitDecl;
@@ -136,6 +140,12 @@ public:
   /// delete a previous connection to a destination if there was one. Returns
   /// true if an old connect was erased.
   bool setLastConnect(FieldRef dest, Operation *connection) {
+    // 'const' connections are disallowed within non-const conditions
+    if (isWithinNonconstCondition && isConst(dest.getValue().getType()))
+      connection->emitError(
+          "'const' sink \"" + getFieldName(dest).first +
+          "\" initialization is dependent on a non-'const' condition");
+
     // Try to insert, if it doesn't insert, replace the previous value.
     auto itAndInserted = driverMap.getLastScope().insert({dest, connection});
     if (!std::get<1>(itAndInserted)) {
@@ -227,9 +237,23 @@ public:
     // mux(cond, invalid, x) -> x
     // mux(cond, x, invalid) -> x
     Value newValue = whenTrue;
-    if (trueIsInvalid == falseIsInvalid)
+    if (trueIsInvalid == falseIsInvalid) {
+      if (!llvm::all_equal(llvm::map_range(
+              std::array{cond, whenTrue, whenFalse},
+              [](Value value) { return isConst(value.getType()); }))) {
+        auto constCastIfNeeded = [&](Value value) -> Value {
+          if (isConst(value.getType()))
+            return b.create<ConstCastOp>(fusedLoc, value);
+          return value;
+        };
+
+        cond = constCastIfNeeded(cond);
+        whenTrue = constCastIfNeeded(whenTrue);
+        whenFalse = constCastIfNeeded(whenFalse);
+      }
+
       newValue = b.createOrFold<MuxPrimOp>(fusedLoc, cond, whenTrue, whenFalse);
-    else if (trueIsInvalid)
+    } else if (trueIsInvalid)
       newValue = whenFalse;
     return b.create<ConnectOp>(loc, dest, newValue);
   }
@@ -428,8 +452,12 @@ namespace {
 class WhenOpVisitor : public LastConnectResolver<WhenOpVisitor> {
 
 public:
-  WhenOpVisitor(ScopedDriverMap &driverMap, Value condition)
-      : LastConnectResolver<WhenOpVisitor>(driverMap), condition(condition) {}
+  WhenOpVisitor(ScopedDriverMap &driverMap, Value condition,
+                bool isWithinNonconstOuterCondition)
+      : LastConnectResolver<WhenOpVisitor>(
+            driverMap, isWithinNonconstOuterCondition ||
+                           (condition && !isConst(condition.getType()))),
+        condition(condition) {}
 
   using LastConnectResolver<WhenOpVisitor>::visitExpr;
   using LastConnectResolver<WhenOpVisitor>::visitDecl;
@@ -519,7 +547,8 @@ void LastConnectResolver<ConcreteT>::processWhenOp(WhenOp whenOp,
 
   auto &thenBlock = whenOp.getThenBlock();
   driverMap.pushScope();
-  WhenOpVisitor(driverMap, thenCondition).process(thenBlock);
+  WhenOpVisitor(driverMap, thenCondition, isWithinNonconstCondition)
+      .process(thenBlock);
   mergeBlock(*parentBlock, Block::iterator(whenOp), thenBlock);
   auto thenScope = driverMap.popScope();
 
@@ -535,7 +564,8 @@ void LastConnectResolver<ConcreteT>::processWhenOp(WhenOp whenOp,
                                                 elseCondition);
     auto &elseBlock = whenOp.getElseBlock();
     driverMap.pushScope();
-    WhenOpVisitor(driverMap, elseCondition).process(elseBlock);
+    WhenOpVisitor(driverMap, elseCondition, isWithinNonconstCondition)
+        .process(elseBlock);
     mergeBlock(*parentBlock, Block::iterator(whenOp), elseBlock);
     elseScope = driverMap.popScope();
   }
