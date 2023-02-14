@@ -755,6 +755,18 @@ def BitCastOp: FIRRTLOp<"bitcast", [Pure]> {
   let assemblyFormat = "$input attr-dict `:` functional-type($input, $result)";
 }
 
+def ConstCastOp: FIRRTLOp<"constcast", 
+  [Pure, 
+  TypesMatchWith<"result type should be the non-'const' version of the input type", 
+                 "input", "result", "$_self.cast<FIRRTLBaseType>().getConstType(false)">]> {
+  let summary = "Convert a 'const' value to a non-'const' version for use in non-'const' ops";
+
+  let arguments = (ins ConstType<FIRRTLBaseType>:$input);
+  let results = (outs FIRRTLBaseType:$result);
+
+  let assemblyFormat = "$input attr-dict `:` type($input)";
+}
+
 //===----------------------------------------------------------------------===//
 // RefOperations: Operations on the RefType.
 //

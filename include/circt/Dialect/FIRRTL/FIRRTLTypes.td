@@ -136,6 +136,11 @@ def RefType : FIRRTLDialectType<
     and do not represent a circuit element or entity.
   }]>;
 
+class ConstType<Type t> : FIRRTLDialectType<
+  And<[t.predicate, 
+       CPred<"$_self.isa<FIRRTLBaseType>() && $_self.cast<FIRRTLBaseType>().isConst()">]>,
+  "a const base type", t.cppClassName>;
+
 //===----------------------------------------------------------------------===//
 // FIRRTL Types Predicates
 //===----------------------------------------------------------------------===//

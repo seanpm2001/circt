@@ -1531,6 +1531,7 @@ struct FIRRTLLowering : public FIRRTLVisitor<FIRRTLLowering, LogicalResult> {
   LogicalResult visitExpr(AsUIntPrimOp op) { return lowerNoopCast(op); }
   LogicalResult visitExpr(AsClockPrimOp op) { return lowerNoopCast(op); }
   LogicalResult visitExpr(AsAsyncResetPrimOp op) { return lowerNoopCast(op); }
+  LogicalResult visitExpr(ConstCastOp op) { return lowerNoopCast(op); }
 
   LogicalResult visitExpr(HWStructCastOp op);
   LogicalResult visitExpr(BitCastOp op);
