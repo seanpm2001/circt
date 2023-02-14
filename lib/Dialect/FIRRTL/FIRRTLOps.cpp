@@ -2800,8 +2800,7 @@ static bool isSameIntTypeKind(Type lhs, Type rhs, int32_t &lhsWidth,
   // Must have two integer types with the same signedness.
   auto lhsi = lhs.dyn_cast<IntType>();
   auto rhsi = rhs.dyn_cast<IntType>();
-  if (!lhsi || !rhsi || lhsi.isSigned() != rhsi.isSigned() ||
-      lhsi.isConst() != rhsi.isConst()) {
+  if (!lhsi || !rhsi || lhsi.isSigned() != rhsi.isSigned()) {
     if (loc) {
       if (lhsi && !rhsi)
         mlir::emitError(*loc, "second operand must be an integer type, not ")
@@ -2812,10 +2811,8 @@ static bool isSameIntTypeKind(Type lhs, Type rhs, int32_t &lhsWidth,
       else if (!lhsi && !rhsi)
         mlir::emitError(*loc, "operands must be integer types, not ")
             << lhs << " and " << rhs;
-      else if (lhsi.isSigned() != rhsi.isSigned())
-        mlir::emitError(*loc, "operand signedness must match");
       else
-        mlir::emitError(*loc, "operand constness must match");
+        mlir::emitError(*loc, "operand signedness must match");
     }
     return false;
   }
@@ -2832,6 +2829,12 @@ LogicalResult impl::verifySameOperandsIntTypeKind(Operation *op) {
   return success(isSameIntTypeKind(op->getOperand(0).getType(),
                                    op->getOperand(1).getType(), lhsWidth,
                                    rhsWidth, op->getLoc()));
+}
+
+LogicalResult impl::verifySameOperandsConstness(Operation *op) {
+  if (llvm::all_equal(llvm::map_range(op->getOperandTypes(), isConst)))
+    return success();
+  return op->emitError("operand constness must match");
 }
 
 LogicalResult impl::validateBinaryOpArguments(ValueRange operands,

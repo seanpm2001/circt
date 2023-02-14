@@ -134,6 +134,7 @@ StrictConnectOp getSingleConnectUserOf(Value value);
 // functions commonly used among operations.
 namespace impl {
 LogicalResult verifySameOperandsIntTypeKind(Operation *op);
+LogicalResult verifySameOperandsConstness(Operation *op);
 
 // Type inference adaptor for FIRRTL operations.
 LogicalResult inferReturnTypes(
@@ -172,6 +173,16 @@ class SameOperandsIntTypeKind
 public:
   static LogicalResult verifyTrait(Operation *op) {
     return impl::verifySameOperandsIntTypeKind(op);
+  }
+};
+
+/// An operation where the operands have the same constness.
+template <typename ConcreteOp>
+class SameOperandsConstness
+    : public OpTrait::TraitBase<ConcreteOp, SameOperandsConstness> {
+public:
+  static LogicalResult verifyTrait(Operation *op) {
+    return impl::verifySameOperandsConstness(op);
   }
 };
 

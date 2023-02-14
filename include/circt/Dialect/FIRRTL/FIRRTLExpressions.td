@@ -24,6 +24,10 @@ def SameOperandsIntTypeKind : NativeOpTrait<"SameOperandsIntTypeKind"> {
   let cppNamespace = "::circt::firrtl";
 }
 
+def SameOperandsConstness : NativeOpTrait<"SameOperandsConstness"> {
+  let cppNamespace = "::circt::firrtl";
+}
+
 class IndexConstraint<string value, string resultValue>
   : TypesMatchWith<"type should be element of vector type",
                    value, resultValue,
@@ -32,7 +36,7 @@ class IndexConstraint<string value, string resultValue>
 // A common base class for operations that implement type inference and parsed
 // argument validation.
 class FIRRTLExprOp<string mnemonic, list<Trait> traits = []> :
-    FIRRTLOp<mnemonic, traits # [HasCustomSSAName, InferTypeOpInterface, Pure]> {
+    FIRRTLOp<mnemonic, traits # [HasCustomSSAName, InferTypeOpInterface, Pure, SameOperandsConstness]> {
 
   // The narrow operation-specific type inference method. Operations can
   // override this with an inline declaration for the class header, or just
