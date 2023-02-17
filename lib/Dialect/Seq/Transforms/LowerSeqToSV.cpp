@@ -345,6 +345,43 @@ llvm::SmallVector<Value> extract(Value value) {
   return llvm::SmallVector<Value>(andOp.getOperands().begin(),
                                   andOp.getOperands().end());
 }
+
+static bool isOperationEquivalentExceptForNamehints(Value lhsValue,
+                                                    Value rhsValue) {
+  if (lhsValue == rhsValue)
+    return true;
+  auto *lhs = lhsValue.getDefiningOp();
+  auto *rhs = rhsValue.getDefiningOp();
+
+  if (lhs->getName() != rhs->getName() || lhs->getNumRegions() ||
+      rhs->getNumRegions() || lhs->getNumSuccessors() ||
+      rhs->getNumSuccessors() || lhs->getNumResults() != 1 ||
+      rhs->getNumResults() != 1 ||
+      lhs->getNumOperands() != rhs->getNumOperands())
+    return false;
+
+  if (!llvm::all_of(llvm::zip(lhs->getOperands(), rhs->getOperands()),
+                    [](auto p) {
+                      // Don't recurse the function.
+                      return std::get<0>(p) == std::get<1>(p);
+                    }))
+    return false;
+
+  auto lhsAttr = lhs->getAttrDictionary();
+  auto rhsAttr = rhs->getAttrDictionary();
+  return llvm::all_of(lhsAttr,
+                      [&](auto p) {
+                        if (p.getName() == "sv.namehint")
+                          return true;
+                        return rhsAttr.get(p.getName()) == p.getValue();
+                      }) &&
+         llvm::all_of(rhsAttr, [&](auto p) {
+           if (p.getName() == "sv.namehint")
+             return true;
+           return lhsAttr.get(p.getName()) == p.getValue();
+         });
+}
+
 static std::optional<std::tuple<Value, Value, Value, Value>>
 tryRestroingSubaccess(OpBuilder &builder, Value reg, Value term,
                       hw::ArrayCreateOp nextArray) {
@@ -436,6 +473,7 @@ void FirRegLower::createTree(OpBuilder &builder, Value reg, Value term,
                   builder.create<hw::ArrayGetOp>(term.getLoc(), term, index);
 
               createTree(builder, nextReg, termElement, trueValue);
+              termElement.erase();
             },
             [&]() { createTree(builder, reg, term, nextVal); });
         return;
