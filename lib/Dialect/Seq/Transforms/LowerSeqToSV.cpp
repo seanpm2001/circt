@@ -27,6 +27,10 @@
 #include "llvm/ADT/IntervalMap.h"
 #include "llvm/ADT/TypeSwitch.h"
 
+#include <iterator>
+#include <optional>
+#include <set>
+
 using namespace circt;
 using namespace seq;
 
@@ -325,6 +329,79 @@ static bool areEquivalentValues(Value term, Value next) {
   // TODO: Handle struct if necessary.
   return false;
 }
+// Pattern match following if condition. Return <cond, idx, val, next>
+// if (cond){
+//   reg[idx] <= val;
+// }else{
+//   reg <= next
+// }
+llvm::SmallVector<Value> extract(Value value) {
+  auto andOp = value.getDefiningOp<comb::AndOp>();
+  if (!andOp) {
+    llvm::SmallVector<Value> ret;
+    ret.push_back(value);
+    return ret;
+  }
+  return llvm::SmallVector<Value>(andOp.getOperands().begin(),
+                                  andOp.getOperands().end());
+}
+static std::optional<std::tuple<Value, Value, Value, Value>>
+tryRestroingSubaccess(OpBuilder &builder, Value reg, Value term,
+                      hw::ArrayCreateOp nextArray) {
+  Value v;
+  SmallVector<Value> conditions;
+  SmallVector<Value> falseVals;
+  if (!llvm::all_of(llvm::reverse(nextArray.getOperands()), [&](auto op) {
+        auto mux = op.template getDefiningOp<comb::MuxOp>();
+        if (!mux || !mux.getTwoState())
+          return false;
+        if (v && v != mux.getTrueValue())
+          return false;
+        v = mux.getTrueValue();
+        conditions.push_back(mux.getCond());
+        falseVals.push_back(mux.getFalseValue());
+        return true;
+      }))
+    return {};
+  llvm::SmallVector<Value> common = extract(conditions.front());
+  for (auto condition : conditions) {
+    SmallVector<Value> newCondition;
+    auto cond = extract(condition);
+    llvm::erase_if(common,
+                   [&](auto v) { return llvm::find(cond, v) == cond.end(); });
+  }
+  Value indexValue;
+  for (auto [idx, condition] : llvm::enumerate(conditions)) {
+    llvm::SmallVector<Value> cond = extract(condition);
+    if (cond.size() != common.size() + 1)
+      return {};
+    llvm::erase_if(
+        cond, [&](auto v) { return llvm::find(common, v) != common.end(); });
+    if (cond.size() != 1)
+      return {};
+    auto comp = (*cond.begin()).getDefiningOp<comb::ICmpOp>();
+    if (!comp || comp.getPredicate() != comb::ICmpPredicate::eq)
+      return {};
+    if (indexValue && indexValue != comp.getLhs())
+      return {};
+    indexValue = comp.getLhs();
+    auto constOp = comp.getRhs().getDefiningOp<hw::ConstantOp>();
+    if (!constOp || constOp.getValue() != idx)
+      return {};
+  }
+  OpBuilder::InsertionGuard guard(builder);
+  builder.setInsertionPointAfterValue(reg);
+  Value commonCond;
+  if (common.empty())
+    commonCond = builder.create<hw::ConstantOp>(reg.getLoc(), APInt(1, 1));
+  else
+    commonCond =
+        builder.create<comb::AndOp>(reg.getLoc(), builder.getI1Type(), common);
+  std::reverse(falseVals.begin(), falseVals.end());
+  auto next = builder.create<hw::ArrayCreateOp>(reg.getLoc(), falseVals);
+
+  return std::make_tuple(commonCond, indexValue, v, next);
+}
 
 void FirRegLower::createTree(OpBuilder &builder, Value reg, Value term,
                              Value next) {
@@ -342,6 +419,27 @@ void FirRegLower::createTree(OpBuilder &builder, Value reg, Value term,
     // If the next value is an array creation, split the value into
     // invidial elements and construct trees recursively.
     if (auto array = next.getDefiningOp<hw::ArrayCreateOp>()) {
+      if (auto opt = tryRestroingSubaccess(builder, reg, term, array)) {
+        Value cond, index, trueValue, nextVal;
+        std::tie(cond, index, trueValue, nextVal) = *opt;
+        addToIfBlock(
+            builder, cond,
+            [&]() {
+              // OpBuilder::InsertionGuard guard(builder);
+              // builder.setInsertionPointAfterValue(reg);
+              auto nextReg = builder.create<sv::ArrayIndexInOutOp>(reg.getLoc(),
+                                                                   reg, index);
+
+              nextReg.emitError() << "Foo!";
+
+              auto termElement =
+                  builder.create<hw::ArrayGetOp>(term.getLoc(), term, index);
+
+              createTree(builder, nextReg, termElement, trueValue);
+            },
+            [&]() { createTree(builder, reg, term, nextVal); });
+        return;
+      }
       for (auto [idx, value] :
            llvm::enumerate(llvm::reverse(array.getOperands()))) {
 
