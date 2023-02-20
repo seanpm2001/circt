@@ -30,7 +30,14 @@ def LowerSeqFIRRTLToSV: Pass<"lower-seq-firrtl-to-sv", "hw::HWModuleOp"> {
             "Disable emission of register randomization code">,
     Option<"addVivadoRAMAddressConflictSynthesisBugWorkaround",
            "add-vivado-ram-address-conflict-synthesis-bug-workaround", "bool", "false",
-            "Add a vivado attribute to specify a ram style of array registers">
+            "Add a vivado attribute to specify a ram style of array registers">,
+    Option<"disableSubaccessRestoring",
+           "disable-subaccess-restoring", "bool", "false",
+            "Disable restoring FIRRTL subaccess updates">
+  ];
+  let statistics = [
+    Statistic<"numSubaccessRestored", "num-subaccess-restored",
+      "Number of lhs subaccess operations restored ">
   ];
 }
 
