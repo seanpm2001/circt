@@ -27,6 +27,9 @@
 #include "llvm/ADT/IntervalMap.h"
 #include "llvm/ADT/TypeSwitch.h"
 
+#include <optional>
+#include <set>
+
 using namespace circt;
 using namespace seq;
 
@@ -41,6 +44,7 @@ struct SeqFIRRTLToSVPass
   using LowerSeqFIRRTLToSVBase<
       SeqFIRRTLToSVPass>::addVivadoRAMAddressConflictSynthesisBugWorkaround;
   using LowerSeqFIRRTLToSVBase<SeqFIRRTLToSVPass>::LowerSeqFIRRTLToSVBase;
+  using LowerSeqFIRRTLToSVBase<SeqFIRRTLToSVPass>::numSubaccessRestored;
 };
 } // anonymous namespace
 
@@ -116,6 +120,8 @@ public:
             addVivadoRAMAddressConflictSynthesisBugWorkaround){};
 
   void lower();
+
+  unsigned numSubaccessRestored = 0;
 
 private:
   struct RegLowerInfo {
@@ -326,6 +332,79 @@ static bool areEquivalentValues(Value term, Value next) {
   return false;
 }
 
+llvm::SetVector<Value> extract(Value value) {
+  auto andOp = value.getDefiningOp<comb::AndOp>();
+  if (!andOp || !andOp.getTwoState()) {
+    llvm::SetVector<Value> ret;
+    ret.insert(value);
+    return ret;
+  }
+  return llvm::SetVector<Value>(andOp.getOperands().begin(),
+                                andOp.getOperands().end());
+}
+
+// Pattern match following if condition. Return <cond, idx, val, next>
+// if (cond){
+//   reg[idx] <= val;
+// }else{
+//   reg <= next
+// }
+static std::optional<std::tuple<Value, Value, Value, Value>>
+tryRestroingSubaccess(OpBuilder &builder, Value reg, Value term,
+                      hw::ArrayCreateOp nextArray) {
+  Value v;
+  SmallVector<Value> conditions;
+  SmallVector<Value> falseVals;
+  if (!llvm::all_of(llvm::reverse(nextArray.getOperands()), [&](auto op) {
+        auto mux = op.template getDefiningOp<comb::MuxOp>();
+        if (!mux || !mux.getTwoState())
+          return false;
+        if (v && v != mux.getTrueValue())
+          return false;
+        if(!v)
+          v = mux.getTrueValue();
+        conditions.push_back(mux.getCond());
+        falseVals.push_back(mux.getFalseValue());
+        return true;
+      }))
+    return {};
+  llvm::SetVector<Value> common = extract(conditions.front());
+  for (auto condition : conditions) {
+    auto cond = extract(condition);
+    common.remove_if([&](auto v) { return !cond.contains(v); });
+  }
+  Value indexValue;
+  for (auto [idx, condition] : llvm::enumerate(conditions)) {
+    llvm::SetVector<Value> cond = extract(condition);
+    if (cond.size() != common.size() + 1)
+      return {};
+    cond.remove_if([&](auto v) { return common.contains(v); });
+    if (cond.size() != 1)
+      return {};
+    auto comp = (*cond.begin()).getDefiningOp<comb::ICmpOp>();
+    if (!comp ||  !comp.getTwoState() || comp.getPredicate() != comb::ICmpPredicate::eq)
+      return {};
+    if (indexValue && indexValue != comp.getLhs())
+      return {};
+    indexValue = comp.getLhs();
+    auto constOp = comp.getRhs().getDefiningOp<hw::ConstantOp>();
+    if (!constOp || constOp.getValue() != idx)
+      return {};
+  }
+  OpBuilder::InsertionGuard guard(builder);
+  builder.setInsertionPointAfterValue(reg);
+  Value commonCond;
+  if (common.empty())
+    commonCond = builder.create<hw::ConstantOp>(reg.getLoc(), APInt(1, 1));
+  else
+    commonCond = builder.create<comb::AndOp>(reg.getLoc(), builder.getI1Type(),
+                                             common.takeVector(), true);
+  std::reverse(falseVals.begin(), falseVals.end());
+  auto next = builder.create<hw::ArrayCreateOp>(reg.getLoc(), falseVals);
+
+  return std::make_tuple(commonCond, indexValue, v, next);
+}
+
 void FirRegLower::createTree(OpBuilder &builder, Value reg, Value term,
                              Value next) {
   // If term and next values are equivalent, we don't have to create an
@@ -342,6 +421,29 @@ void FirRegLower::createTree(OpBuilder &builder, Value reg, Value term,
     // If the next value is an array creation, split the value into
     // invidial elements and construct trees recursively.
     if (auto array = next.getDefiningOp<hw::ArrayCreateOp>()) {
+      if (auto opt = tryRestroingSubaccess(builder, reg, term, array)) {
+        Value cond, index, trueValue, nextVal;
+        std::tie(cond, index, trueValue, nextVal) = *opt;
+        addToIfBlock(
+            builder, cond,
+            [&]() {
+              // OpBuilder::InsertionGuard guard(builder);
+              // builder.setInsertionPointAfterValue(reg);
+              auto nextReg = builder.create<sv::ArrayIndexInOutOp>(reg.getLoc(),
+                                                                   reg, index);
+
+              nextReg.emitError() << "Foo!";
+
+              auto termElement =
+                  builder.create<hw::ArrayGetOp>(term.getLoc(), term, index);
+
+              createTree(builder, nextReg, termElement, trueValue);
+              termElement.erase();
+            },
+            [&]() { createTree(builder, reg, term, nextVal); });
+        ++numSubaccessRestored;
+        return;
+      }
       for (auto [idx, value] :
            llvm::enumerate(llvm::reverse(array.getOperands()))) {
 
@@ -582,9 +684,10 @@ void SeqToSVPass::runOnOperation() {
 
 void SeqFIRRTLToSVPass::runOnOperation() {
   hw::HWModuleOp module = getOperation();
-  FirRegLower(module, disableRegRandomization,
-              addVivadoRAMAddressConflictSynthesisBugWorkaround)
-      .lower();
+  FirRegLower firRegLower(module, disableRegRandomization,
+                          addVivadoRAMAddressConflictSynthesisBugWorkaround);
+  firRegLower.lower();
+  numSubaccessRestored += firRegLower.numSubaccessRestored;
 }
 
 std::unique_ptr<Pass> circt::seq::createSeqLowerToSVPass() {
