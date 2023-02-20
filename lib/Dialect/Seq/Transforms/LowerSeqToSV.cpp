@@ -343,66 +343,97 @@ llvm::SetVector<Value> extract(Value value) {
                                 andOp.getOperands().end());
 }
 
-// Pattern match following if condition. Return <cond, idx, val, next>
-// if (cond){
+// Pattern match following if condition. Return <cond, idx, val, next>.
+// Check that for all index i, nextArray[i] is equal to
+// `(cond & idx == i)? val : next_i
+// if (cond)
+//    val[idx] <= i;
+// else
+//    foo[idx] <= i;
+// next_i. If so, we can transform into the following form.
+//
+// if (cond) {
 //   reg[idx] <= val;
-// }else{
-//   reg <= next
+//   reg <= {val:  next_{n-1}, ..., next_1, next_0};
 // }
+//
 static std::optional<std::tuple<Value, Value, Value, Value>>
 tryRestroingSubaccess(OpBuilder &builder, Value reg, Value term,
                       hw::ArrayCreateOp nextArray) {
   Value v;
   SmallVector<Value> conditions;
   SmallVector<Value> falseVals;
-  if (!llvm::all_of(llvm::reverse(nextArray.getOperands()), [&](auto op) {
-        auto mux = op.template getDefiningOp<comb::MuxOp>();
-        if (!mux || !mux.getTwoState())
-          return false;
-        if (v && v != mux.getTrueValue())
-          return false;
-        if(!v)
-          v = mux.getTrueValue();
-        conditions.push_back(mux.getCond());
-        falseVals.push_back(mux.getFalseValue());
-        return true;
-      }))
+  if (!llvm::all_of(
+          llvm::enumerate(llvm::reverse(nextArray.getOperands())), [&](auto p) {
+            auto [idx, op] = p;
+            auto mux = op.template getDefiningOp<comb::MuxOp>();
+            // Ensure that mux has binary flag.
+            if (!mux || !mux.getTwoState())
+              return false;
+            // The next value must be same.
+            if (v && v != mux.getTrueValue())
+              return false;
+            if (!v)
+              v = mux.getTrueValue();
+            conditions.push_back(mux.getCond());
+            if (auto arr = mux.getFalseValue()
+                               .template getDefiningOp<hw::ArrayGetOp>()) {
+              auto idxVal = builder.create<hw::ConstantOp>(
+                  nextArray.getLoc(),
+                  APInt(std::max(1u, llvm::Log2_64_Ceil(
+                                         nextArray.getOperands().size())),
+                        idx));
+
+              auto termElement =
+                  builder.create<hw::ArrayGetOp>(term.getLoc(), term, idxVal);
+              bool equivalent =
+                  areEquivalentValues(termElement, mux.getFalseValue());
+              termElement.erase();
+              falseVals.push_back(mux.getFalseValue());
+              return equivalent;
+            }
+            return false;
+          }))
     return {};
-  llvm::SetVector<Value> common = extract(conditions.front());
-  for (auto condition : conditions) {
+  llvm::SetVector<Value> commonConditions = extract(conditions.front());
+  for (auto condition : ArrayRef(conditions).drop_front()) {
     auto cond = extract(condition);
-    common.remove_if([&](auto v) { return !cond.contains(v); });
+    commonConditions.remove_if([&](auto v) { return !cond.contains(v); });
   }
   Value indexValue;
   for (auto [idx, condition] : llvm::enumerate(conditions)) {
-    llvm::SetVector<Value> cond = extract(condition);
-    if (cond.size() != common.size() + 1)
+    llvm::SetVector<Value> ithCond = extract(condition);
+    if (ithCond.size() != commonConditions.size() + 1)
       return {};
-    cond.remove_if([&](auto v) { return common.contains(v); });
-    if (cond.size() != 1)
+    ithCond.remove_if([&](auto v) { return commonConditions.contains(v); });
+    // Remaining ithCondition
+    if (ithCond.size() != 1)
       return {};
-    auto comp = (*cond.begin()).getDefiningOp<comb::ICmpOp>();
-    if (!comp ||  !comp.getTwoState() || comp.getPredicate() != comb::ICmpPredicate::eq)
+    auto indexCompare = (*ithCond.begin()).getDefiningOp<comb::ICmpOp>();
+    if (!indexCompare || !indexCompare.getTwoState() ||
+        indexCompare.getPredicate() != comb::ICmpPredicate::eq)
       return {};
-    if (indexValue && indexValue != comp.getLhs())
+    if (indexValue && indexValue != indexCompare.getLhs())
       return {};
-    indexValue = comp.getLhs();
-    auto constOp = comp.getRhs().getDefiningOp<hw::ConstantOp>();
+    indexValue = indexCompare.getLhs();
+    auto constOp = indexCompare.getRhs().getDefiningOp<hw::ConstantOp>();
     if (!constOp || constOp.getValue() != idx)
       return {};
   }
   OpBuilder::InsertionGuard guard(builder);
   builder.setInsertionPointAfterValue(reg);
-  Value commonCond;
-  if (common.empty())
-    commonCond = builder.create<hw::ConstantOp>(reg.getLoc(), APInt(1, 1));
+  Value commonConditionValue;
+  if (commonConditions.empty())
+    commonConditionValue =
+        builder.create<hw::ConstantOp>(reg.getLoc(), APInt(1, 1));
   else
-    commonCond = builder.create<comb::AndOp>(reg.getLoc(), builder.getI1Type(),
-                                             common.takeVector(), true);
+    commonConditionValue = builder.create<comb::AndOp>(
+        reg.getLoc(), builder.getI1Type(), commonConditions.takeVector(), true);
+  // Make sure that to inverse the array create operands.
   std::reverse(falseVals.begin(), falseVals.end());
   auto next = builder.create<hw::ArrayCreateOp>(reg.getLoc(), falseVals);
 
-  return std::make_tuple(commonCond, indexValue, v, next);
+  return std::make_tuple(commonConditionValue, indexValue, v, next);
 }
 
 void FirRegLower::createTree(OpBuilder &builder, Value reg, Value term,
@@ -421,19 +452,18 @@ void FirRegLower::createTree(OpBuilder &builder, Value reg, Value term,
     // If the next value is an array creation, split the value into
     // invidial elements and construct trees recursively.
     if (auto array = next.getDefiningOp<hw::ArrayCreateOp>()) {
-      if (auto opt = tryRestroingSubaccess(builder, reg, term, array)) {
+
+      // First, try restoring subaccess assignments.
+      if (auto matchResultOpt =
+              tryRestroingSubaccess(builder, reg, term, array)) {
         Value cond, index, trueValue, nextVal;
-        std::tie(cond, index, trueValue, nextVal) = *opt;
+        std::tie(cond, index, trueValue, nextVal) = *matchResultOpt;
         addToIfBlock(
             builder, cond,
             [&]() {
-              // OpBuilder::InsertionGuard guard(builder);
-              // builder.setInsertionPointAfterValue(reg);
               auto nextReg = builder.create<sv::ArrayIndexInOutOp>(reg.getLoc(),
                                                                    reg, index);
-
               nextReg.emitError() << "Foo!";
-
               auto termElement =
                   builder.create<hw::ArrayGetOp>(term.getLoc(), term, index);
 
