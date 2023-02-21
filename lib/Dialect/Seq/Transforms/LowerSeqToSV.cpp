@@ -363,6 +363,7 @@ tryRestroingSubaccess(OpBuilder &builder, Value reg, Value term,
   Value v;
   SmallVector<Value> conditions;
   SmallVector<Value> falseVals;
+  bool equiv = true;
   if (!llvm::all_of(
           llvm::enumerate(llvm::reverse(nextArray.getOperands())), [&](auto p) {
             auto [idx, op] = p;
@@ -389,10 +390,12 @@ tryRestroingSubaccess(OpBuilder &builder, Value reg, Value term,
               bool equivalent =
                   areEquivalentValues(termElement, mux.getFalseValue());
               termElement.erase();
-              falseVals.push_back(mux.getFalseValue());
-              return equivalent;
+              equiv &= equivalent;
+            } else {
+              equiv = false;
             }
-            return false;
+            falseVals.push_back(mux.getFalseValue());
+            return true;
           }))
     return {};
   llvm::SetVector<Value> commonConditions = extract(conditions.front());
@@ -420,6 +423,10 @@ tryRestroingSubaccess(OpBuilder &builder, Value reg, Value term,
     if (!constOp || constOp.getValue() != idx)
       return {};
   }
+
+  if (!equiv && !commonConditions.empty())
+    return {};
+
   OpBuilder::InsertionGuard guard(builder);
   builder.setInsertionPointAfterValue(reg);
   Value commonConditionValue;
@@ -429,9 +436,10 @@ tryRestroingSubaccess(OpBuilder &builder, Value reg, Value term,
   else
     commonConditionValue = builder.create<comb::AndOp>(
         reg.getLoc(), builder.getI1Type(), commonConditions.takeVector(), true);
+
   // Make sure that to inverse the array create operands.
   std::reverse(falseVals.begin(), falseVals.end());
-  auto next = builder.create<hw::ArrayCreateOp>(reg.getLoc(), falseVals);
+  auto next = builder.createOrFold<hw::ArrayCreateOp>(reg.getLoc(), falseVals);
 
   return std::make_tuple(commonConditionValue, indexValue, v, next);
 }
