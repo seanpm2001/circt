@@ -12,22 +12,22 @@ firrtl.memmodule @memmod () attributes {
 
 // Constant op supports different return types.
 firrtl.module @Constants() {
-  // CHECK: %c0_ui0 = firrtl.constant 0 : !firrtl.uint<0>
-  firrtl.constant 0 : !firrtl.uint<0>
-  // CHECK: %c0_si0 = firrtl.constant 0 : !firrtl.sint<0>
-  firrtl.constant 0 : !firrtl.sint<0>
-  // CHECK: %c4_ui8 = firrtl.constant 4 : !firrtl.uint<8>
-  firrtl.constant 4 : !firrtl.uint<8>
-  // CHECK: %c-4_si16 = firrtl.constant -4 : !firrtl.sint<16>
-  firrtl.constant -4 : !firrtl.sint<16>
+  // CHECK: %c0_ui0 = firrtl.constant 0 : !firrtl.const.uint<0>
+  firrtl.constant 0 : !firrtl.const.uint<0>
+  // CHECK: %c0_si0 = firrtl.constant 0 : !firrtl.const.sint<0>
+  firrtl.constant 0 : !firrtl.const.sint<0>
+  // CHECK: %c4_ui8 = firrtl.constant 4 : !firrtl.const.uint<8>
+  firrtl.constant 4 : !firrtl.const.uint<8>
+  // CHECK: %c-4_si16 = firrtl.constant -4 : !firrtl.const.sint<16>
+  firrtl.constant -4 : !firrtl.const.sint<16>
   // CHECK: %c1_clock = firrtl.specialconstant 1 : !firrtl.clock
   firrtl.specialconstant 1 : !firrtl.clock
   // CHECK: %c1_reset = firrtl.specialconstant 1 : !firrtl.reset
   firrtl.specialconstant 1 : !firrtl.reset
   // CHECK: %c1_asyncreset = firrtl.specialconstant 1 : !firrtl.asyncreset
   firrtl.specialconstant 1 : !firrtl.asyncreset
-  // CHECK: firrtl.constant 4 : !firrtl.uint<8> {name = "test"}
-  firrtl.constant 4 : !firrtl.uint<8> {name = "test"}
+  // CHECK: firrtl.constant 4 : !firrtl.const.uint<8> {name = "test"}
+  firrtl.constant 4 : !firrtl.const.uint<8> {name = "test"}
 
   firrtl.aggregateconstant [1, 2, 3] : !firrtl.bundle<a: uint<8>, b: uint<5>, c: uint<4>>
   firrtl.aggregateconstant [1, 2, 3] : !firrtl.vector<uint<8>, 3>

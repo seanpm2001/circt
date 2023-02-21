@@ -178,7 +178,7 @@ firrtl.circuit "DeleteEmptyModule" {
 firrtl.circuit "ForwardConstant" {
   // CHECK-NOT: Zero
   firrtl.module private @Zero(out %zero: !firrtl.uint<1>) {
-    %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     firrtl.strictconnect %zero, %c0_ui1 : !firrtl.uint<1>
   }
   // CHECK-LABEL: @ForwardConstant
@@ -259,7 +259,7 @@ firrtl.circuit "MemoryInDeadCycle" {
   firrtl.module public @MemoryInDeadCycle(in %clock: !firrtl.clock, in %addr: !firrtl.uint<4>) {
 
     // CHECK-NOT: firrtl.mem
-    %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
+    %c1_ui1 = firrtl.constant 1 : !firrtl.const.uint<1>
     %Memory_r = firrtl.mem Undefined
       {
         depth = 12 : i64,

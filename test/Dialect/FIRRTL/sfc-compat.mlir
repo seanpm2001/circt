@@ -124,7 +124,7 @@ firrtl.circuit "SFCCompatTests" {
   //
   // CHECK-LABEL: firrtl.module @ConstantAsyncReset
   firrtl.module @ConstantAsyncReset(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset) {
-    %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     %r0_init = firrtl.wire sym @r0_init : !firrtl.uint<1>
     firrtl.strictconnect %r0_init, %c0_ui1 : !firrtl.uint<1>
     %r0 = firrtl.regreset %clock, %reset, %r0_init : !firrtl.clock, !firrtl.asyncreset, !firrtl.uint<1>, !firrtl.uint<1>
@@ -146,7 +146,7 @@ firrtl.circuit "SFCCompatTests" {
 
   // CHECK-LABEL: firrtl.module @TailPrimOp
   firrtl.module @TailPrimOp(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset) {
-    %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     %0 = firrtl.pad %c0_ui1, 3 : (!firrtl.uint<1>) -> !firrtl.uint<3>
     %1 = firrtl.tail %0, 2 : (!firrtl.uint<3>) -> !firrtl.uint<1>
     %r0_init = firrtl.wire sym @r0_init : !firrtl.uint<1>
@@ -169,7 +169,7 @@ firrtl.circuit "NonConstantAsyncReset_Port" {
 
 firrtl.circuit "NonConstantAsyncReset_PrimOp" {
   firrtl.module @NonConstantAsyncReset_PrimOp(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset) {
-    %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     // expected-note @+1 {{reset driver is here}}
     %c1_ui1 = firrtl.not %c0_ui1 : (!firrtl.uint<1>) -> !firrtl.uint<1>
     // expected-error @below {{register "r0" has an async reset, but its reset value is not driven with a constant value through wires, nodes, or connects}}
@@ -199,7 +199,7 @@ firrtl.circuit "NonConstantAsyncReset_Aggregate1" {
     %value = firrtl.wire : !firrtl.vector<uint<1>, 2>
 
     // Connect a constant 0 to value[0].
-    %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     %value_0 = firrtl.subindex %value[0] : !firrtl.vector<uint<1>, 2>
     firrtl.strictconnect %value_0, %c0_ui1 : !firrtl.uint<1>
 

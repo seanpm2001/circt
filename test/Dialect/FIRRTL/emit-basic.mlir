@@ -115,10 +115,10 @@ firrtl.circuit "Foo" {
     // CHECK: node k1 = SInt<19>(42)
     // CHECK: node k2 = UInt(42)
     // CHECK: node k3 = SInt(42)
-    %0 = firrtl.constant 42 : !firrtl.uint<19>
-    %1 = firrtl.constant 42 : !firrtl.sint<19>
-    %2 = firrtl.constant 42 : !firrtl.uint
-    %3 = firrtl.constant 42 : !firrtl.sint
+    %0 = firrtl.constant 42 : !firrtl.const.uint<19>
+    %1 = firrtl.constant 42 : !firrtl.const.sint<19>
+    %2 = firrtl.constant 42 : !firrtl.const.uint
+    %3 = firrtl.constant 42 : !firrtl.const.sint
     %k0 = firrtl.node %0 : !firrtl.uint<19>
     %k1 = firrtl.node %1 : !firrtl.sint<19>
     %k2 = firrtl.node %2 : !firrtl.uint

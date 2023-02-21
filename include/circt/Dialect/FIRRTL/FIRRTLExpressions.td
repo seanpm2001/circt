@@ -106,13 +106,14 @@ def ConstantOp : FIRRTLOp<"constant",
     }];
 
   let arguments = (ins APSIntAttr:$value);
-  let results = (outs IntType:$result);
+  let results = (outs ConstType<IntType>:$result);
   let hasCustomAssemblyFormat = 1;
 
   let builders = [
     OpBuilder<(ins "IntType":$type, "const APInt &":$value)>,
     OpBuilder<(ins "const APSInt &":$value)>
   ];
+  let hasCanonicalizer = 1;
   let hasFolder = 1;
   let hasVerifier = 1;
 }

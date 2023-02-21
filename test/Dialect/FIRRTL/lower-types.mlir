@@ -387,7 +387,7 @@ firrtl.circuit "TopLevel" {
 // Test RegResetOp lowering
   // CHECK-LABEL: firrtl.module private @LowerRegResetOp
   firrtl.module private @LowerRegResetOp(in %clock: !firrtl.clock, in %reset: !firrtl.uint<1>, in %a_d: !firrtl.vector<uint<1>, 2>, out %a_q: !firrtl.vector<uint<1>, 2>) {
-    %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     %init = firrtl.wire  : !firrtl.vector<uint<1>, 2>
     %0 = firrtl.subindex %init[0] : !firrtl.vector<uint<1>, 2>
     firrtl.connect %0, %c0_ui1 : !firrtl.uint<1>, !firrtl.uint<1>
@@ -397,7 +397,7 @@ firrtl.circuit "TopLevel" {
     firrtl.connect %r, %a_d : !firrtl.vector<uint<1>, 2>, !firrtl.vector<uint<1>, 2>
     firrtl.connect %a_q, %r : !firrtl.vector<uint<1>, 2>, !firrtl.vector<uint<1>, 2>
   }
-  // CHECK:   %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+  // CHECK:   %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
   // CHECK:   %init_0 = firrtl.wire  : !firrtl.uint<1>
   // CHECK:   %init_1 = firrtl.wire  : !firrtl.uint<1>
   // CHECK:   firrtl.connect %init_0, %c0_ui1 : !firrtl.uint<1>, !firrtl.uint<1>
@@ -408,7 +408,7 @@ firrtl.circuit "TopLevel" {
   // CHECK:   firrtl.strictconnect %r_1, %a_d_1 : !firrtl.uint<1>
   // CHECK:   firrtl.strictconnect %a_q_0, %r_0 : !firrtl.uint<1>
   // CHECK:   firrtl.strictconnect %a_q_1, %r_1 : !firrtl.uint<1>
-  // AGGREGATE:       %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+  // AGGREGATE:       %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
   // AGGREGATE-NEXT:  %init = firrtl.wire  : !firrtl.vector<uint<1>, 2>
   // AGGREGATE-NEXT:  %0 = firrtl.subindex %init[0] : !firrtl.vector<uint<1>, 2>
   // AGGREGATE-NEXT:  firrtl.connect %0, %c0_ui1 : !firrtl.uint<1>, !firrtl.uint<1>
@@ -432,7 +432,7 @@ firrtl.circuit "TopLevel" {
 // https://github.com/llvm/circt/issues/795
   // CHECK-LABEL: firrtl.module private @LowerRegResetOpNoName
   firrtl.module private @LowerRegResetOpNoName(in %clock: !firrtl.clock, in %reset: !firrtl.uint<1>, in %a_d: !firrtl.vector<uint<1>, 2>, out %a_q: !firrtl.vector<uint<1>, 2>) {
-    %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     %init = firrtl.wire  : !firrtl.vector<uint<1>, 2>
     %0 = firrtl.subindex %init[0] : !firrtl.vector<uint<1>, 2>
     firrtl.connect %0, %c0_ui1 : !firrtl.uint<1>, !firrtl.uint<1>
@@ -442,7 +442,7 @@ firrtl.circuit "TopLevel" {
     firrtl.connect %r, %a_d : !firrtl.vector<uint<1>, 2>, !firrtl.vector<uint<1>, 2>
     firrtl.connect %a_q, %r : !firrtl.vector<uint<1>, 2>, !firrtl.vector<uint<1>, 2>
   }
-  // CHECK:   %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+  // CHECK:   %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
   // CHECK:   %init_0 = firrtl.wire  : !firrtl.uint<1>
   // CHECK:   %init_1 = firrtl.wire  : !firrtl.uint<1>
   // CHECK:   firrtl.connect %init_0, %c0_ui1 : !firrtl.uint<1>, !firrtl.uint<1>
@@ -530,7 +530,7 @@ firrtl.circuit "TopLevel" {
   firrtl.module private @AnnotationsRegOp(in %clock: !firrtl.clock, in %reset: !firrtl.uint<1>) {
     %bazInit = firrtl.wire  : !firrtl.vector<uint<1>, 2>
     %0 = firrtl.subindex %bazInit[0] : !firrtl.vector<uint<1>, 2>
-    %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     firrtl.connect %0, %c0_ui1 : !firrtl.uint<1>, !firrtl.uint<1>
     %1 = firrtl.subindex %bazInit[1] : !firrtl.vector<uint<1>, 2>
     firrtl.connect %1, %c0_ui1 : !firrtl.uint<1>, !firrtl.uint<1>
@@ -798,12 +798,12 @@ firrtl.circuit "TopLevel" {
 // CHECK-LABEL:    firrtl.module private @write1D(in %b: !firrtl.uint<1>, in %sel: !firrtl.uint<2>, in %default_0: !firrtl.uint<1>, in %default_1: !firrtl.uint<1>, out %a_0: !firrtl.uint<1>, out %a_1: !firrtl.uint<1>) {
 // CHECK-NEXT:      firrtl.strictconnect %a_0, %default_0 : !firrtl.uint<1>
 // CHECK-NEXT:      firrtl.strictconnect %a_1, %default_1 : !firrtl.uint<1>
-// CHECK-NEXT:      %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+// CHECK-NEXT:      %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
 // CHECK-NEXT:      %0 = firrtl.eq %sel, %c0_ui1 : (!firrtl.uint<2>, !firrtl.uint<1>) -> !firrtl.uint<1>
 // CHECK-NEXT:      firrtl.when %0 : !firrtl.uint<1> {
 // CHECK-NEXT:        firrtl.strictconnect %a_0, %b : !firrtl.uint<1>
 // CHECK-NEXT:      }
-// CHECK-NEXT:      %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
+// CHECK-NEXT:      %c1_ui1 = firrtl.constant 1 : !firrtl.const.uint<1>
 // CHECK-NEXT:      %1 = firrtl.eq %sel, %c1_ui1 : (!firrtl.uint<2>, !firrtl.uint<1>) -> !firrtl.uint<1>
 // CHECK-NEXT:      firrtl.when %1 : !firrtl.uint<1> {
 // CHECK-NEXT:        firrtl.strictconnect %a_1, %b : !firrtl.uint<1>
@@ -825,29 +825,29 @@ firrtl.circuit "TopLevel" {
     firrtl.connect %1, %b : !firrtl.uint<2>, !firrtl.uint<2>
   }
 // CHECK-LABEL:    firrtl.module private @multidimWrite(in %sel: !firrtl.uint<1>, in %b: !firrtl.uint<2>, out %a_0_0: !firrtl.uint<2>, out %a_0_1: !firrtl.uint<2>, out %a_1_0: !firrtl.uint<2>, out %a_1_1: !firrtl.uint<2>) {
-// CHECK-NEXT:      %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+// CHECK-NEXT:      %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
 // CHECK-NEXT:      %0 = firrtl.eq %sel, %c0_ui1 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
 // CHECK-NEXT:      firrtl.when %0 : !firrtl.uint<1> {
-// CHECK-NEXT:        %c0_ui1_0 = firrtl.constant 0 : !firrtl.uint<1>
+// CHECK-NEXT:        %c0_ui1_0 = firrtl.constant 0 : !firrtl.const.uint<1>
 // CHECK-NEXT:        %2 = firrtl.eq %sel, %c0_ui1_0 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
 // CHECK-NEXT:        firrtl.when %2 : !firrtl.uint<1> {
 // CHECK-NEXT:          firrtl.strictconnect %a_0_0, %b : !firrtl.uint<2>
 // CHECK-NEXT:        }
-// CHECK-NEXT:        %c1_ui1_1 = firrtl.constant 1 : !firrtl.uint<1>
+// CHECK-NEXT:        %c1_ui1_1 = firrtl.constant 1 : !firrtl.const.uint<1>
 // CHECK-NEXT:        %3 = firrtl.eq %sel, %c1_ui1_1 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
 // CHECK-NEXT:        firrtl.when %3 : !firrtl.uint<1> {
 // CHECK-NEXT:          firrtl.strictconnect %a_0_1, %b : !firrtl.uint<2>
 // CHECK-NEXT:        }
 // CHECK-NEXT:      }
-// CHECK-NEXT:      %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
+// CHECK-NEXT:      %c1_ui1 = firrtl.constant 1 : !firrtl.const.uint<1>
 // CHECK-NEXT:      %1 = firrtl.eq %sel, %c1_ui1 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
 // CHECK-NEXT:      firrtl.when %1 : !firrtl.uint<1> {
-// CHECK-NEXT:        %c0_ui1_0 = firrtl.constant 0 : !firrtl.uint<1>
+// CHECK-NEXT:        %c0_ui1_0 = firrtl.constant 0 : !firrtl.const.uint<1>
 // CHECK-NEXT:        %2 = firrtl.eq %sel, %c0_ui1_0 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
 // CHECK-NEXT:        firrtl.when %2 : !firrtl.uint<1> {
 // CHECK-NEXT:          firrtl.strictconnect %a_1_0, %b : !firrtl.uint<2>
 // CHECK-NEXT:        }
-// CHECK-NEXT:        %c1_ui1_1 = firrtl.constant 1 : !firrtl.uint<1>
+// CHECK-NEXT:        %c1_ui1_1 = firrtl.constant 1 : !firrtl.const.uint<1>
 // CHECK-NEXT:        %3 = firrtl.eq %sel, %c1_ui1_1 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
 // CHECK-NEXT:        firrtl.when %3 : !firrtl.uint<1> {
 // CHECK-NEXT:          firrtl.strictconnect %a_1_1, %b : !firrtl.uint<2>
@@ -877,12 +877,12 @@ firrtl.circuit "TopLevel" {
 // CHECK-NEXT:      firrtl.strictconnect %b_0_valid, %def_0_valid : !firrtl.uint<2>
 // CHECK-NEXT:      firrtl.strictconnect %b_1_wo, %def_1_wo : !firrtl.uint<1>
 // CHECK-NEXT:      firrtl.strictconnect %b_1_valid, %def_1_valid : !firrtl.uint<2>
-// CHECK-NEXT:      %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+// CHECK-NEXT:      %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
 // CHECK-NEXT:      %0 = firrtl.eq %sel, %c0_ui1 : (!firrtl.uint<2>, !firrtl.uint<1>) -> !firrtl.uint<1>
 // CHECK-NEXT:      firrtl.when %0 : !firrtl.uint<1> {
 // CHECK-NEXT:        firrtl.strictconnect %b_0_wo, %a_wo : !firrtl.uint<1>
 // CHECK-NEXT:      }
-// CHECK-NEXT:      %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
+// CHECK-NEXT:      %c1_ui1 = firrtl.constant 1 : !firrtl.const.uint<1>
 // CHECK-NEXT:      %1 = firrtl.eq %sel, %c1_ui1 : (!firrtl.uint<2>, !firrtl.uint<1>) -> !firrtl.uint<1>
 // CHECK-NEXT:      firrtl.when %1 : !firrtl.uint<1> {
 // CHECK-NEXT:        firrtl.strictconnect %b_1_wo, %a_wo : !firrtl.uint<1>
@@ -923,7 +923,7 @@ firrtl.circuit "TopLevel" {
 // Handle zero-length vector subaccess
   // CHECK-LABEL: zvec
   firrtl.module private @zvec(in %i: !firrtl.vector<bundle<a: uint<8>, b: uint<4>>, 0>, in %sel: !firrtl.uint<1>, out %foo: !firrtl.vector<uint<1>, 0>, out %o: !firrtl.uint<8>) {
-    %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     %0 = firrtl.subaccess %foo[%c0_ui1] : !firrtl.vector<uint<1>, 0>, !firrtl.uint<1>
     firrtl.connect %0, %c0_ui1 : !firrtl.uint<1>, !firrtl.uint<1>
     %1 = firrtl.subaccess %i[%sel] : !firrtl.vector<bundle<a: uint<8>, b: uint<4>>, 0>, !firrtl.uint<1>
@@ -992,9 +992,9 @@ firrtl.extmodule @is1436_BAR(out io: !firrtl.bundle<llWakeup flip: vector<uint<1
 firrtl.module private @is1436_FOO() {
   %thing_io = firrtl.instance thing @is1436_BAR(out io: !firrtl.bundle<llWakeup flip: vector<uint<1>, 1>>)
   %0 = firrtl.subfield %thing_io[llWakeup] : !firrtl.bundle<llWakeup flip: vector<uint<1>, 1>>
-  %c0_ui2 = firrtl.constant 0 : !firrtl.uint<2>
+  %c0_ui2 = firrtl.constant 0 : !firrtl.const.uint<2>
   %1 = firrtl.subaccess %0[%c0_ui2] : !firrtl.vector<uint<1>, 1>, !firrtl.uint<2>
-  %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+  %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
   firrtl.connect %1, %c0_ui1 : !firrtl.uint<1>, !firrtl.uint<1>
   }
   // CHECK-LABEL: firrtl.module private @BitCast1

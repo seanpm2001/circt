@@ -16,7 +16,7 @@ firrtl.circuit "AsyncResetConst" {
     out %z5: !firrtl.vector<uint<8>, 1>
   ) {
     // Constant check should handle trivial cases.
-    %c0_ui = firrtl.constant 0 : !firrtl.uint<8>
+    %c0_ui = firrtl.constant 0 : !firrtl.const.uint<8>
     %0 = firrtl.regreset %clock, %reset, %c0_ui : !firrtl.clock, !firrtl.asyncreset, !firrtl.uint<8>, !firrtl.uint<8>
 
     // Constant check should see through nodes.

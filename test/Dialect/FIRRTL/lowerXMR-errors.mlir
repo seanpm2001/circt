@@ -13,7 +13,7 @@ firrtl.circuit "xmr" {
 
 firrtl.circuit "Top" {
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
   }
@@ -39,7 +39,7 @@ firrtl.circuit "Top" {
 
 firrtl.circuit "Top" {
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
   }

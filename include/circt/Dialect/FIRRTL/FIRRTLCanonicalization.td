@@ -22,14 +22,14 @@ include "mlir/IR/PatternBase.td"
 /// Constraint that matches a ConstantOp, SpecialConstantOp, AggregateConstantOp, or InvalidValueOp.
 def AnyConstantOp : Constraint<CPred<[{
   isa_and_nonnull<ConstantOp, SpecialConstantOp, InvalidValueOp, AggregateConstantOp>
-    ($0.getDefiningOp())
+    (getDefiningOpPassingThroughConstCast($0))
   }]>>;
 
 /// Constraint that matches non-constant operations. Used to ensure that the
 /// const-on-LHS rewriting patterns converge in case both operands are constant.
 def NonConstantOp : Constraint<CPred<[{
   !isa_and_nonnull<ConstantOp, SpecialConstantOp, InvalidValueOp, AggregateConstantOp>
-    ($0.getDefiningOp())
+    (getDefiningOpPassingThroughConstCast($0))
   }]>>;
 
 // Constraint that matches empty attribute dictionaries.  Used to ensure that
@@ -54,7 +54,7 @@ def SIntTypes : Constraint<CPred<"$0.isa<SIntType>()">>;
 def UIntTypes : Constraint<CPred<"$0.isa<UIntType>()">>;
 
 // Constraint that enforces types mismatches
-def mismatchTypes : Constraint<CPred<"$0.getType() != $1.getType()">>;
+def mismatchTypes : Constraint<CPred<"$0.getType() != $1.getType() && (!$0.getType().isa<FIRRTLBaseType>() || !$1.getType().isa<FIRRTLBaseType>() || $0.getType().cast<FIRRTLBaseType>().getConstType(false) != $1.getType().cast<FIRRTLBaseType>().getConstType(false))">>;
 
 // Constraint that enforces types of known width
 def KnownWidth : Constraint<CPred<[{
@@ -64,22 +64,26 @@ def KnownWidth : Constraint<CPred<[{
 
 /// Constraint that matches a zero ConstantOp or SpecialConstantOp.
 def ZeroConstantOp : Constraint<Or<[
-  CPred<"$0.getDefiningOp<ConstantOp>() &&"
-        "$0.getDefiningOp<ConstantOp>().getValue().isZero()">,
-  CPred<"$0.getDefiningOp<SpecialConstantOp>() &&"
-        "$0.getDefiningOp<SpecialConstantOp>().getValue() == false">
+  CPred<"getDefiningOpPassingThroughConstCast<ConstantOp>($0) &&"
+        "getDefiningOpPassingThroughConstCast<ConstantOp>($0).getValue().isZero()">,
+  CPred<"getDefiningOpPassingThroughConstCast<SpecialConstantOp>($0) &&"
+        "getDefiningOpPassingThroughConstCast<SpecialConstantOp>($0).getValue() == false">
 ]>>;
 
 /// Constraint that matches a one ConstantOp or SpecialConstantOp.
 def OneConstantOp : Constraint<Or<[
-  CPred<"$0.getDefiningOp<ConstantOp>() &&"
-        "$0.getDefiningOp<ConstantOp>().getValue().isOne()">,
-  CPred<"$0.getDefiningOp<SpecialConstantOp>() &&"
-        "$0.getDefiningOp<SpecialConstantOp>().getValue() == true">
+  CPred<"getDefiningOpPassingThroughConstCast<ConstantOp>($0) &&"
+        "getDefiningOpPassingThroughConstCast<ConstantOp>($0).getValue().isOne()">,
+  CPred<"getDefiningOpPassingThroughConstCast<SpecialConstantOp>($0) &&"
+        "getDefiningOpPassingThroughConstCast<SpecialConstantOp>($0).getValue() == true">
 ]>>;
 
 /// Constraint that matches an all ones ConstantOp.
-def AllOneConstantOp : Constraint<CPred<"$0.getDefiningOp<ConstantOp>() && $0.getDefiningOp<ConstantOp>().getValue().isAllOnes()">>;
+def AllOneConstantOp : Constraint<
+  CPred<"getDefiningOpPassingThroughConstCast<ConstantOp>($0) && "
+        "getDefiningOpPassingThroughConstCast<ConstantOp>($0).getValue().isAllOnes()">>;
+
+def NonConstType : Constraint<CPred<"!isConst($0.getType())">>;
 
 /// Drop the writer to the first argument and passthrough the second
 def DropWrite : NativeCodeCall<"dropWrite($_builder, $0, $1)">;
@@ -88,6 +92,11 @@ def MoveNameHint : NativeCodeCall<"moveNameHint($0, $1)">;
 
 def GetEmptyString : NativeCodeCall<
   "StringAttr::get($_builder.getContext(), {}) ">;
+
+def MakeConstantZero : NativeCodeCall<
+  "makeIntConstant($_builder, $0.getLoc(), $0.getType().cast<IntType>(), getIntZerosAttr($0.getType()))">;
+def MakeConstantOnes : NativeCodeCall<
+  "makeIntConstant($_builder, $0.getLoc(), $0.getType().cast<IntType>(), getIntOnesAttr($0.getType()))">;
 
 // leq(const, x) -> geq(x, const)
 def LEQWithConstLHS : Pat<
@@ -143,6 +152,15 @@ def DShrOfConstant : Pat<
   (DShrPrimOp:$old $x, (ConstantOp $cst)),
   (PadPrimOp (MoveNameHint $old, (ShrPrimOp $x, (LimitConstant32 $cst))), (TypeWidth32 $old)),
   [(KnownWidth $x)]>;
+
+// This works around the fact that materialized constants may expect a non-const result.
+// This pattern matches the case where the constant op was created using a non-const
+// type, and replaces the op with a correct constant op and a const cast to get
+// back to the non-const type.
+def FixupMaterializedIntConstant : Pat<
+  (ConstantOp:$result $value),
+  (ConstCastOp (NativeCodeCall<"$_builder.create<ConstantOp>($0.getLoc(), $0.getType().cast<IntType>().getConstType(true), $1)"> $result, $value)),
+  [(NonConstType $result)]>;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Extend arguments to make types match
@@ -227,13 +245,13 @@ def SubFromZeroUnsigned : Pat <
 //sub(a,a) -> 0
 def SubOfSelf : Pat <
   (SubPrimOp:$old $x, $x),
-  (NativeCodeCall<"$_builder.create<ConstantOp>($0.getLoc(), $0.getType().cast<IntType>(), getIntZerosAttr($0.getType()))"> $old),
+  (MakeConstantZero $old),
   [(KnownWidth $x)]>;
 
 // and(x, 0) -> 0, fold can't handle all cases
 def AndOfZero : Pat <
   (AndPrimOp:$old $x, (ConstantOp:$zcst $cst)),
-  (NativeCodeCall<"$_builder.create<ConstantOp>($0.getLoc(), $0.getType().cast<IntType>(), getIntZerosAttr($0.getType()))"> $old),
+  (MakeConstantZero $old),
   [(KnownWidth $x), (ZeroConstantOp $zcst)]>;
 
 // and(x, -1) -> x, fold can't handle all cases
@@ -257,7 +275,7 @@ def OrOfZero : Pat <
 // or(x, -1) -> -1, fold can't handle all cases
 def OrOfAllOne : Pat <
   (OrPrimOp:$old $x, (ConstantOp:$ocst $cst)),
-  (NativeCodeCall<"$_builder.create<ConstantOp>($0.getLoc(), $0.getType().cast<IntType>(), getIntOnesAttr($0.getType()))"> $old),
+  (MakeConstantOnes $old),
   [(KnownWidth $x), (EqualTypes $x, $ocst), (AllOneConstantOp $ocst)]>;
 
 /// or(x,x) -> x, fold can't handle all cases
@@ -275,7 +293,7 @@ def XorOfZero : Pat <
 /// xor(x,x) -> 0, fold can't handle all cases
 def XorOfSelf : Pat <
   (XorPrimOp:$old $x, $x),
-  (NativeCodeCall<"$_builder.create<ConstantOp>($0.getLoc(), $0.getType().cast<IntType>(), getIntZerosAttr($0.getType()))"> $old),
+  (MakeConstantZero $old),
   [(KnownWidth $x)]>;
 
 // bits(bits(x, ...), ...) -> bits(x, ...)

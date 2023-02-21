@@ -2410,8 +2410,8 @@ void ConstantOp::build(OpBuilder &builder, OperationState &result, IntType type,
 void ConstantOp::build(OpBuilder &builder, OperationState &result,
                        const APSInt &value) {
   auto attr = IntegerAttr::get(builder.getContext(), value);
-  auto type =
-      IntType::get(builder.getContext(), value.isSigned(), value.getBitWidth());
+  auto type = IntType::get(builder.getContext(), value.isSigned(),
+                           value.getBitWidth(), true);
   return build(builder, result, type, attr);
 }
 

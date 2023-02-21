@@ -20,14 +20,14 @@ firrtl.circuit "padZeroReg"   {
   // CHECK-LABEL: firrtl.module @padZeroReg
   firrtl.module @padZeroReg(in %clock: !firrtl.clock, out %z: !firrtl.uint<16>) {
       %_r = firrtl.reg droppable_name %clock  :  !firrtl.clock, !firrtl.uint<8>
-      %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+      %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
       %0 = firrtl.or %_r, %c0_ui1 : (!firrtl.uint<8>, !firrtl.uint<1>) -> !firrtl.uint<8>
       firrtl.connect %_r, %0 : !firrtl.uint<8>, !firrtl.uint<8>
-      %c171_ui8 = firrtl.constant 171 : !firrtl.uint<8>
+      %c171_ui8 = firrtl.constant 171 : !firrtl.const.uint<8>
       %_n = firrtl.node droppable_name %c171_ui8  : !firrtl.uint<8>
       %1 = firrtl.cat %_n, %_r : (!firrtl.uint<8>, !firrtl.uint<8>) -> !firrtl.uint<16>
       firrtl.connect %z, %1 : !firrtl.uint<16>, !firrtl.uint<16>
-    // CHECK: %[[TMP:.+]] = firrtl.constant 43776 : !firrtl.uint<16>
+    // CHECK: %[[TMP:.+]] = firrtl.constant 43776 : !firrtl.const.uint<16>
     // CHECK-NEXT: firrtl.strictconnect %z, %[[TMP]] : !firrtl.uint<16>
   }
 }

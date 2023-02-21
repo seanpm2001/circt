@@ -19,7 +19,7 @@ firrtl.circuit "xmr" {
 // Simple 1 level read from constant.
 firrtl.circuit "SimpleRead" {
   firrtl.module @Bar(out %_a: !firrtl.ref<uint<1>>) {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
   }
@@ -36,7 +36,7 @@ firrtl.circuit "SimpleRead" {
 // Forward module port to instance
 firrtl.circuit "ForwardToInstance" {
   firrtl.module @Bar2(out %_a: !firrtl.ref<uint<1>>) {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
   }
@@ -57,7 +57,7 @@ firrtl.circuit "ForwardToInstance" {
 // Multiple readers, for a single remote value.
 firrtl.circuit "ForwardToInstance" {
   firrtl.module @Bar2(out %_a: !firrtl.ref<uint<1>>) {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1    : !firrtl.ref<uint<1>>
   }
@@ -102,7 +102,7 @@ firrtl.circuit "DUT" {
   }
 
   firrtl.module private @MyView_companion (in %ref_in1: !firrtl.uint<1>, in %ref_in2: !firrtl.uint<4>) {
-    %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     %_WIRE = firrtl.wire sym @_WIRE : !firrtl.uint<1>
     firrtl.strictconnect %_WIRE, %c0_ui1 : !firrtl.uint<1>
     %iface = sv.interface.instance sym @__MyView_MyInterface__  : !sv.interface<@MyInterface>
@@ -119,14 +119,14 @@ firrtl.circuit "DUT" {
 // RefType of aggregates and RefSub. 
 firrtl.circuit "RefTypeVector" {
   firrtl.module @RefTypeVector() {
-    %zero = firrtl.constant 0 : !firrtl.uint<4>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<4>
     %z = firrtl.bitcast %zero : (!firrtl.uint<4>) -> !firrtl.vector<uint<1>,4>
     %1 = firrtl.ref.send %z : !firrtl.vector<uint<1>,4>
     %10 = firrtl.ref.sub %1[0] : !firrtl.ref<vector<uint<1>,4>>
     %11 = firrtl.ref.sub %1[1] : !firrtl.ref<vector<uint<1>,4>>
     %a = firrtl.ref.resolve %10 : !firrtl.ref<uint<1>>
     %b = firrtl.ref.resolve %11 : !firrtl.ref<uint<1>>
-    %z2 = firrtl.constant 0 : !firrtl.uint<3>
+    %z2 = firrtl.constant 0 : !firrtl.const.uint<3>
     %bundle = firrtl.bitcast %z2 : (!firrtl.uint<3>) -> !firrtl.bundle<a: uint<1>, b: uint<2>>
     %b1 = firrtl.ref.send %bundle : !firrtl.bundle<a: uint<1>, b: uint<2>>
     %12 = firrtl.ref.sub %b1[1] : !firrtl.ref<bundle<a: uint<1>, b: uint<2>>>

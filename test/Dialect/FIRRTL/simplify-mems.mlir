@@ -5,7 +5,7 @@ firrtl.circuit "ReadOnlyMemory" {
   // CHECK-LABEL: firrtl.module public @ReadOnlyMemory
   firrtl.module public @ReadOnlyMemory(in %clock: !firrtl.clock, in %addr: !firrtl.uint<4>) {
 
-    %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
+    %c1_ui1 = firrtl.constant 1 : !firrtl.const.uint<1>
     %Memory_r = firrtl.mem Undefined
       {
         depth = 12 : i64,
@@ -30,7 +30,7 @@ firrtl.circuit "WriteOnlyMemory" {
   // CHECK-LABEL: firrtl.module public @WriteOnlyMemory
   firrtl.module public @WriteOnlyMemory(in %clock: !firrtl.clock, in %addr: !firrtl.uint<4>, in %indata: !firrtl.uint<42>) {
 
-    %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
+    %c1_ui1 = firrtl.constant 1 : !firrtl.const.uint<1>
     %Memory_write = firrtl.mem Undefined
       {
         depth = 12 : i64,
@@ -57,7 +57,7 @@ firrtl.circuit "WriteOnlyMemory" {
 firrtl.circuit "ReadWriteToWrite" {
   firrtl.module public @ReadWriteToWrite(in %clock: !firrtl.clock, in %addr: !firrtl.uint<4>, in %indata: !firrtl.uint<42>, out %result: !firrtl.uint<42>) {
 
-    %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
+    %c1_ui1 = firrtl.constant 1 : !firrtl.const.uint<1>
 
     // CHECK: %Memory_rw, %Memory_r = firrtl.mem  Undefined
     // CHECK-SAME: !firrtl.bundle<addr: uint<4>, en: uint<1>, clk: clock, data: uint<42>, mask: uint<1>>
@@ -138,8 +138,8 @@ firrtl.circuit "UnusedPorts" {
       out %result_rw: !firrtl.uint<42>,
       out %result_pinned: !firrtl.uint<42>) {
 
-    %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
-    %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
+    %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
+    %c1_ui1 = firrtl.constant 1 : !firrtl.const.uint<1>
 
     // CHECK: %Memory_pinned = firrtl.mem  Undefined
     // CHECK-SAME: !firrtl.bundle<addr: uint<4>, en: uint<1>, clk: clock, rdata flip: uint<42>, wmode: uint<1>, wdata: uint<42>, wmask: uint<1>>

@@ -255,7 +255,7 @@ firrtl.module @renaming() {
   %0, %1, %2 = firrtl.instance myinst @declarations(in clock : !firrtl.clock, in u8 : !firrtl.uint<8>, in reset : !firrtl.asyncreset)
 }
 firrtl.module @declarations(in %clock : !firrtl.clock, in %u8 : !firrtl.uint<8>, in %reset : !firrtl.asyncreset) attributes {annotations = [{class = "firrtl.passes.InlineAnnotation"}]} {
-  %c0_ui8 = firrtl.constant 0 : !firrtl.uint<8>
+  %c0_ui8 = firrtl.constant 0 : !firrtl.const.uint<8>
   // CHECK: %cmem = chirrtl.combmem : !chirrtl.cmemory<uint<8>, 8>
   %cmem = chirrtl.combmem : !chirrtl.cmemory<uint<8>, 8>
   // CHECK: %mem_read = firrtl.mem Undefined {depth = 1 : i64, name = "mem", portNames = ["read"], readLatency = 0 : i32, writeLatency = 1 : i32} : !firrtl.bundle<addr: uint<1>, en: uint<1>, clk: clock, data flip: sint<42>>
@@ -830,14 +830,14 @@ firrtl.circuit "CollidingSymbolsMultiInline" {
 // CHECK-LABEL: firrtl.circuit "Top" {
 firrtl.circuit "Top" {
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) attributes {annotations = [{class = "firrtl.passes.InlineAnnotation"}]}{
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
   }
   firrtl.module @Bar(out %_a: !firrtl.ref<uint<1>>) attributes {annotations = [{class = "firrtl.passes.InlineAnnotation"}]}{
     %xmr   = firrtl.instance bar sym @barXMR @XmrSrcMod(out _a: !firrtl.ref<uint<1>>)
     firrtl.strictconnect %_a, %xmr   : !firrtl.ref<uint<1>>
-    // CHECK:  %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    // CHECK:  %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     // CHECK:  %0 = firrtl.ref.send %c0_ui1 : !firrtl.uint<1>
     // CHECK:  firrtl.strictconnect %_a, %0 : !firrtl.ref<uint<1>>
   }
@@ -846,7 +846,7 @@ firrtl.circuit "Top" {
     %a = firrtl.wire : !firrtl.uint<1>
     %0 = firrtl.ref.resolve %bar_a : !firrtl.ref<uint<1>>
     firrtl.strictconnect %a, %0 : !firrtl.uint<1>
-    // CHECK:  %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    // CHECK:  %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     // CHECK:  %0 = firrtl.ref.send %c0_ui1 : !firrtl.uint<1>
     // CHECK:  %a = firrtl.wire   : !firrtl.uint<1>
     // CHECK:  %1 = firrtl.ref.resolve %0 : !firrtl.ref<uint<1>>
@@ -888,7 +888,7 @@ firrtl.circuit "Top" {
 // CHECK-LABEL: firrtl.circuit "Top" {
 firrtl.circuit "Top" {
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
   }
@@ -908,19 +908,19 @@ firrtl.circuit "Top" {
   }
   firrtl.module @Top() attributes {annotations = [{class = "firrtl.transforms.FlattenAnnotation"}]}{
     %bar_a = firrtl.instance bar sym @bar  @Bar(out _a: !firrtl.ref<uint<1>>)
-    // CHECK:  %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    // CHECK:  %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     // CHECK:  %0 = firrtl.ref.send %c0_ui1 : !firrtl.uint<1>
     // CHECK:  %1 = firrtl.ref.resolve %0 : !firrtl.ref<uint<1>>
     // CHECK:  %bar_a = firrtl.wire   : !firrtl.uint<1>
     // CHECK:  firrtl.strictconnect %bar_a, %1 : !firrtl.uint<1>
     %foo_a = firrtl.instance foo sym @foo @Foo(out _a: !firrtl.ref<uint<1>>)
-    // CHECK:  %c0_ui1_0 = firrtl.constant 0 : !firrtl.uint<1>
+    // CHECK:  %c0_ui1_0 = firrtl.constant 0 : !firrtl.const.uint<1>
     // CHECK:  %2 = firrtl.ref.send %c0_ui1_0 : !firrtl.uint<1>
     // CHECK:  %3 = firrtl.ref.resolve %2 : !firrtl.ref<uint<1>>
     // CHECK:  %foo_a = firrtl.wire   : !firrtl.uint<1>
     // CHECK:  firrtl.strictconnect %foo_a, %3 : !firrtl.uint<1>
     %xmr_a = firrtl.instance xmr sym @xmr @XmrSrcMod(out _a: !firrtl.ref<uint<1>>)
-    // CHECK:  %c0_ui1_1 = firrtl.constant 0 : !firrtl.uint<1>
+    // CHECK:  %c0_ui1_1 = firrtl.constant 0 : !firrtl.const.uint<1>
     // CHECK:  %4 = firrtl.ref.send %c0_ui1_1 : !firrtl.uint<1>
     %a = firrtl.wire : !firrtl.uint<1>
     %b = firrtl.wire : !firrtl.uint<1>
@@ -946,7 +946,7 @@ firrtl.circuit "Top" {
 // CHECK-LABEL: firrtl.circuit "Top" {
 firrtl.circuit "Top" {
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
   }
@@ -977,7 +977,7 @@ firrtl.circuit "Top" {
 // CHECK-LABEL: firrtl.circuit "Top" {
 firrtl.circuit "Top" {
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
   }
@@ -1007,7 +1007,7 @@ firrtl.circuit "Top" {
 // CHECK-LABEL: firrtl.circuit "Top" {
 firrtl.circuit "Top" {
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
   }
@@ -1049,13 +1049,13 @@ firrtl.circuit "Top" {
 // CHECK-LABEL: firrtl.circuit "Top"
 firrtl.circuit "Top" {
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
   }
   firrtl.module @Top() attributes {annotations = [{class = "firrtl.transforms.FlattenAnnotation"}]}{
     %xmr = firrtl.instance xmr sym @TopXMR @XmrSrcMod(out _a: !firrtl.ref<uint<1>>)
-    // CHECK:  %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    // CHECK:  %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     // CHECK:  %0 = firrtl.ref.send %c0_ui1 : !firrtl.uint<1>
     %a = firrtl.wire : !firrtl.uint<1>
     %xmr2 = firrtl.ref.send %a : !firrtl.uint<1>

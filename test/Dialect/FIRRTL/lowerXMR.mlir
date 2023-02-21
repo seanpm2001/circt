@@ -27,8 +27,8 @@ firrtl.circuit "Top" {
   // CHECK-SAME:   [@Top::@bar, @Bar::@barXMR, @XmrSrcMod::@[[xmrSym:[a-zA-Z0-9_]+]]]
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) {
     // CHECK: firrtl.module @XmrSrcMod() {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
-    // CHECK:  %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
+    // CHECK:  %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     // CHECK:  %0 = firrtl.node sym @[[xmrSym]] %c0_ui1  : !firrtl.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
@@ -58,13 +58,13 @@ firrtl.circuit "Top" {
   firrtl.module @Top(in %bar_a : !firrtl.ref<uint<0>>, in %bar_b : !firrtl.ref<vector<uint<0>,10>>) {
     %a = firrtl.wire : !firrtl.uint<0>
     %0 = firrtl.ref.resolve %bar_a : !firrtl.ref<uint<0>>
-    // CHECK:  %[[c0_ui0:.+]] = firrtl.constant 0 : !firrtl.uint<0>
+    // CHECK:  %[[c0_ui0:.+]] = firrtl.constant 0 : !firrtl.const.uint<0>
     firrtl.strictconnect %a, %0 : !firrtl.uint<0>
     // CHECK:  firrtl.strictconnect %a, %[[c0_ui0]] : !firrtl.uint<0>
     %b = firrtl.wire : !firrtl.vector<uint<0>,10>
     %1 = firrtl.ref.resolve %bar_b : !firrtl.ref<vector<uint<0>,10>>
     firrtl.strictconnect %b, %1 : !firrtl.vector<uint<0>,10>
-    // CHECK:	%[[c0_ui0_0:.+]] = firrtl.constant 0 : !firrtl.uint<0>
+    // CHECK:	%[[c0_ui0_0:.+]] = firrtl.constant 0 : !firrtl.const.uint<0>
     // CHECK:  %[[v2:.+]] = firrtl.bitcast %[[c0_ui0_0]] : (!firrtl.uint<0>) -> !firrtl.vector<uint<0>, 10>
     // CHECK:  firrtl.strictconnect %b, %[[v2]] : !firrtl.vector<uint<0>, 10>
   }
@@ -110,7 +110,7 @@ firrtl.circuit "Top" {
   // CHECK-DAG: hw.hierpath private @[[path_4:[a-zA-Z0-9_]+]] [@Top::@xmr, @XmrSrcMod::@[[xmrSym]]]
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) {
     // CHECK: firrtl.module @XmrSrcMod() {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     // CHECK:   %c0_ui1 = firrtl.constant 0
     // CHECK:  %0 = firrtl.node sym @[[xmrSym]] %c0_ui1  : !firrtl.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
@@ -174,7 +174,7 @@ firrtl.circuit "Top" {
   // CHECK: hw.hierpath private @[[path:[a-zA-Z0-9_]+]] [@Top::@bar, @Bar::@barXMR, @XmrSrcMod::@[[xmrSym:[a-zA-Z0-9_]+]]]
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) {
     // CHECK: firrtl.module @XmrSrcMod() {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     // CHECK:  %c0_ui1 = firrtl.constant 0
     // CHECK:  %0 = firrtl.node sym @[[xmrSym]] %c0_ui1  : !firrtl.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
@@ -248,7 +248,7 @@ firrtl.circuit "Top" {
   // CHECK: hw.hierpath private @[[path_0:[a-zA-Z0-9_]+]] [@Top::@foo, @Foo::@fooXMR, @XmrSrcMod::@[[xmrSym:[a-zA-Z0-9_]+]]]
   // CHECK: hw.hierpath private @[[path_1:[a-zA-Z0-9_]+]] [@Top::@xmr, @XmrSrcMod::@[[xmrSym]]]
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
     // CHECK: firrtl.node sym @[[xmrSym]]
@@ -282,7 +282,7 @@ firrtl.circuit "Top" {
 firrtl.circuit "Top" {
   // CHECK: hw.hierpath private @[[path:[a-zA-Z0-9_]+]] [@Top::@xmr, @XmrSrcMod::@[[xmrSym:[a-zA-Z0-9_]+]]]
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
     // CHECK: firrtl.node sym @[[xmrSym]]
@@ -328,7 +328,7 @@ firrtl.circuit "Top" {
 firrtl.circuit "Top" {
   // CHECK: hw.hierpath private @[[path:[a-zA-Z0-9_]+]] [@Top::@xmr, @XmrSrcMod::@[[xmrSym:[a-zA-Z0-9_]+]]]
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
     // CHECK: firrtl.node sym @[[xmrSym]]
@@ -373,7 +373,7 @@ firrtl.circuit "Top" {
 firrtl.circuit "Top" {
   // CHECK: hw.hierpath private @[[path:[a-zA-Z0-9_]+]] [@Dut::@xmr, @XmrSrcMod::@[[xmrSym:[a-zA-Z0-9_]+]]]
   firrtl.module @XmrSrcMod(out %_a: !firrtl.ref<uint<1>>) {
-    %zero = firrtl.constant 0 : !firrtl.uint<1>
+    %zero = firrtl.constant 0 : !firrtl.const.uint<1>
     %1 = firrtl.ref.send %zero : !firrtl.uint<1>
     firrtl.strictconnect %_a, %1 : !firrtl.ref<uint<1>>
     // CHECK: firrtl.node sym @[[xmrSym]]
@@ -425,7 +425,7 @@ firrtl.circuit "Top"  {
   // CHECK-LABEL: firrtl.module private @DUTModule
   // CHECK-SAME: (in %clock: !firrtl.clock, in %io_addr: !firrtl.uint<3>, in %io_dataIn: !firrtl.uint<8>, in %io_wen: !firrtl.uint<1>, out %io_dataOut: !firrtl.uint<8>)
   firrtl.module private @DUTModule(in %clock: !firrtl.clock, in %io_addr: !firrtl.uint<3>, in %io_dataIn: !firrtl.uint<8>, in %io_wen: !firrtl.uint<1>, out %io_dataOut: !firrtl.uint<8>, out %_gen_memTap: !firrtl.ref<vector<uint<8>, 8>>) attributes {annotations = [{class = "sifive.enterprise.firrtl.MarkDUTAnnotation"}]} {
-    %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
+    %c1_ui1 = firrtl.constant 1 : !firrtl.const.uint<1>
     %rf_memTap, %rf_read, %rf_write = firrtl.mem  Undefined  {depth = 8 : i64, groupID = 1 : ui32, name = "rf", portNames = ["memTap", "read", "write"], readLatency = 0 : i32, writeLatency = 1 : i32} : !firrtl.ref<vector<uint<8>, 8>>, !firrtl.bundle<addr: uint<3>, en: uint<1>, clk: clock, data flip: uint<8>>, !firrtl.bundle<addr: uint<3>, en: uint<1>, clk: clock, data: uint<8>, mask: uint<1>>
     // CHECK:  %rf_read, %rf_write = firrtl.mem sym @xmr_sym  Undefined  {depth = 8 : i64, groupID = 1 : ui32, name = "rf", portNames = ["read", "write"], readLatency = 0 : i32, writeLatency = 1 : i32} : !firrtl.bundle<addr: uint<3>, en: uint<1>, clk: clock, data flip: uint<8>>, !firrtl.bundle<addr: uint<3>, en: uint<1>, clk: clock, data: uint<8>, mask: uint<1>>
     %0 = firrtl.subfield %rf_read[addr] : !firrtl.bundle<addr: uint<3>, en: uint<1>, clk: clock, data flip: uint<8>>
@@ -509,7 +509,7 @@ firrtl.circuit "Top"  {
   // CHECK-LABEL:  firrtl.module private @DUTModule
   // CHECK-SAME: in %io_wen: !firrtl.uint<1>, out %io_dataOut: !firrtl.uint<8>)
   firrtl.module private @DUTModule(in %clock: !firrtl.clock, in %io_addr: !firrtl.uint<3>, in %io_dataIn: !firrtl.uint<8>, in %io_wen: !firrtl.uint<1>, out %io_dataOut: !firrtl.uint<8>, out %_gen_memTap_0: !firrtl.ref<uint<8>>, out %_gen_memTap_1: !firrtl.ref<uint<8>>) attributes {annotations = [{class = "sifive.enterprise.firrtl.MarkDUTAnnotation"}]} {
-    %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
+    %c1_ui1 = firrtl.constant 1 : !firrtl.const.uint<1>
     %rf_memTap, %rf_read, %rf_write = firrtl.mem  Undefined  {depth = 2 : i64, groupID = 1 : ui32, name = "rf", portNames = ["memTap", "read", "write"], readLatency = 0 : i32, writeLatency = 1 : i32} : !firrtl.ref<vector<uint<8>, 2>>, !firrtl.bundle<addr: uint<1>, en: uint<1>, clk: clock, data flip: uint<8>>, !firrtl.bundle<addr: uint<1>, en: uint<1>, clk: clock, data: uint<8>, mask: uint<1>>
     // CHECK:  %rf_read, %rf_write = firrtl.mem sym @xmr_sym  Undefined  {depth = 2 : i64, groupID = 1 : ui32, name = "rf", portNames = ["read", "write"], readLatency = 0 : i32, writeLatency = 1 : i32} : !firrtl.bundle<addr: uint<1>, en: uint<1>, clk: clock, data flip: uint<8>>, !firrtl.bundle<addr: uint<1>, en: uint<1>, clk: clock, data: uint<8>, mask: uint<1>>
     %9 = firrtl.ref.sub %rf_memTap[0] : !firrtl.ref<vector<uint<8>, 2>>
@@ -614,7 +614,7 @@ firrtl.circuit "Top"  {
     %a = firrtl.wire   : !firrtl.uint<0>
     %0 = firrtl.ref.resolve %bar__a : !firrtl.ref<uint<0>>
     firrtl.strictconnect %a, %0 : !firrtl.uint<0>
-    // CHECK: %c0_ui0 = firrtl.constant 0 : !firrtl.uint<0>
+    // CHECK: %c0_ui0 = firrtl.constant 0 : !firrtl.const.uint<0>
     // CHECK: firrtl.strictconnect %a, %c0_ui0 : !firrtl.uint<0>
   }
 }

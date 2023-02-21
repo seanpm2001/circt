@@ -208,13 +208,13 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
     ; CHECK: firrtl.node interesting_name %auto : !firrtl.uint<1>
     node check_output = auto
 
-    ; CHECK: %c42_ui10 = firrtl.constant 42 : !firrtl.uint<10>
-    ; CHECK: %c171_ui8 = firrtl.constant 171 : !firrtl.uint<8>
+    ; CHECK: %c42_ui10 = firrtl.constant 42 : !firrtl.const.uint<10>
+    ; CHECK: %c171_ui8 = firrtl.constant 171 : !firrtl.const.uint<8>
     ; CHECK: firrtl.add %c42_ui10, %c171_ui8
     ; CHECK: firrtl.strictconnect %auto
     auto11 <= add(UInt<10>(42), UInt<8>("hAB"))
 
-    ; CHECK: %c-85_si8 = firrtl.constant -85 : !firrtl.sint<8>
+    ; CHECK: %c-85_si8 = firrtl.constant -85 : !firrtl.const.sint<8>
     sauto <= add(s8, SInt<8>(-85))
 
     ; CHECK: firrtl.when %reset : !firrtl.uint<1> {
@@ -525,14 +525,14 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
   module constant_implicit_cse :
     input cond : UInt<1>
 
-    ; CHECK: [[CST15:%.+]] = firrtl.constant 15 : !firrtl.uint<4>
+    ; CHECK: [[CST15:%.+]] = firrtl.constant 15 : !firrtl.const.uint<4>
     ; CHECK: %a = firrtl.node interesting_name [[CST15]]
     node a = UInt<4>(15)
     ; CHECK: %b = firrtl.node interesting_name [[CST15]]
     node b = UInt<4>(15)
 
     ;; Constants always get emitted to the top level.
-    ; CHECK: [[CST7:%.+]] = firrtl.constant 7 : !firrtl.uint<4>
+    ; CHECK: [[CST7:%.+]] = firrtl.constant 7 : !firrtl.const.uint<4>
     ; CHECK: firrtl.when %cond : !firrtl.uint<1> {
     when cond :
       ; CHECK: %c = firrtl.node interesting_name [[CST15]]
@@ -619,14 +619,14 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
   module issue354 :
     output tmp5: SInt<19>
     tmp5 <= SInt<19>(8)
-     ; CHECK: %c8_si19 = firrtl.constant 8 : !firrtl.sint<19>
+     ; CHECK: %c8_si19 = firrtl.constant 8 : !firrtl.const.sint<19>
      ; CHECK: firrtl.strictconnect %tmp5, %c8_si19 : !firrtl.sint<19>
 
    ; CHECK-LABEL: firrtl.module private @issue347
   module issue347 :
     output tmp12: SInt<4>
     tmp12 <= SInt<4>(-4)
-    ; CHECK: %c-4_si4 = firrtl.constant -4 : !firrtl.sint<4>
+    ; CHECK: %c-4_si4 = firrtl.constant -4 : !firrtl.const.sint<4>
 
   ; CHECK-LABEL: firrtl.extmodule private @issue183<A: si32 = -1>()
   extmodule issue183:
@@ -896,7 +896,7 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
   module issue1303:
     output out: Reset
     out <= UInt(1)
-    ; CHECK: %[[c1:.*]] = firrtl.constant 1 : !firrtl.uint
+    ; CHECK: %[[c1:.*]] = firrtl.constant 1 : !firrtl.const.uint
     ; CHECK-NEXT: firrtl.connect %out, %[[c1]] : !firrtl.reset, !firrtl.uint
 
 

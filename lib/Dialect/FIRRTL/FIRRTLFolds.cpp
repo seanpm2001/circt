@@ -54,6 +54,33 @@ static Value moveNameHint(OpResult old, Value passthrough) {
   return passthrough;
 }
 
+// Makes a ConstantOp with an optional ConstCastOp if the type is non-const
+static Value makeIntConstant(PatternRewriter &rewriter, Location loc,
+                             IntType type, IntegerAttr value) {
+  auto constantOp =
+      rewriter.create<ConstantOp>(loc, type.getConstType(true), value);
+  if (type.isConst())
+    return constantOp;
+  return rewriter.create<ConstCastOp>(loc, constantOp.getResult());
+}
+
+// If this value is the result of an operation, return the operation that
+// defines it, passing through ConstCastOp.
+static Operation *getDefiningOpPassingThroughConstCast(Value value) {
+  auto *definingOp = value.getDefiningOp();
+  if (auto constCastOp = llvm::dyn_cast_or_null<ConstCastOp>(definingOp))
+    return constCastOp.getInput().getDefiningOp();
+  return definingOp;
+}
+
+// If this value is the result of an operation of type OpTy, return the
+// operation that defines it, passing through ConstCastOp.
+template <typename OpTy>
+static OpTy getDefiningOpPassingThroughConstCast(Value value) {
+  return llvm::dyn_cast_or_null<OpTy>(
+      getDefiningOpPassingThroughConstCast(value));
+}
+
 // Declarative canonicalization patterns
 namespace circt {
 namespace firrtl {
@@ -338,6 +365,36 @@ static APInt getMaxSignedValue(unsigned bitWidth) {
   return bitWidth > 0 ? APInt::getSignedMaxValue(bitWidth) : APInt();
 }
 
+template <typename OpType>
+static void updateFoldAdaptorForConstCast(
+    OpType op, typename OpType::FoldAdaptor &adaptor,
+    SmallVectorImpl<Attribute> &updatedOperandStorage) {
+  updatedOperandStorage.reserve(op->getNumOperands());
+  auto constantOperands = adaptor.getOperands();
+  for (size_t i = 0, e = op->getNumOperands(); i != e; ++i) {
+    if (auto constOperand = constantOperands[i]) {
+      updatedOperandStorage.push_back(constOperand);
+      continue;
+    }
+
+    Attribute updatedConstantOperand;
+    auto value = op->getOperand(i);
+    if (auto constCastOp = value.template getDefiningOp<ConstCastOp>()) {
+      if (auto *constSourceOp = constCastOp.getInput().getDefiningOp();
+          constSourceOp &&
+          constSourceOp->template hasTrait<OpTrait::ConstantLike>()) {
+        SmallVector<OpFoldResult> results;
+        if (succeeded(constSourceOp->fold({}, results))) {
+          if (auto attribute = results[0].dyn_cast<Attribute>())
+            updatedConstantOperand = attribute;
+        }
+      }
+    }
+    updatedOperandStorage.push_back(updatedConstantOperand);
+  }
+  adaptor = typename OpType::FoldAdaptor(updatedOperandStorage);
+}
+
 //===----------------------------------------------------------------------===//
 // Fold Hooks
 //===----------------------------------------------------------------------===//
@@ -345,6 +402,11 @@ static APInt getMaxSignedValue(unsigned bitWidth) {
 OpFoldResult ConstantOp::fold(FoldAdaptor adaptor) {
   assert(adaptor.getOperands().empty() && "constant has no operands");
   return getValueAttr();
+}
+
+void ConstantOp::getCanonicalizationPatterns(RewritePatternSet &results,
+                                             MLIRContext *context) {
+  results.insert<patterns::FixupMaterializedIntConstant>(context);
 }
 
 OpFoldResult SpecialConstantOp::fold(FoldAdaptor adaptor) {
@@ -362,6 +424,8 @@ OpFoldResult AggregateConstantOp::fold(FoldAdaptor adaptor) {
 //===----------------------------------------------------------------------===//
 
 OpFoldResult AddPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
   return constFoldFIRRTLBinaryOp(
       *this, adaptor.getOperands(), BinOpKind::Normal,
       [=](const APSInt &a, const APSInt &b) { return a + b; });
@@ -375,6 +439,8 @@ void AddPrimOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OpFoldResult SubPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
   return constFoldFIRRTLBinaryOp(
       *this, adaptor.getOperands(), BinOpKind::Normal,
       [=](const APSInt &a, const APSInt &b) { return a - b; });
@@ -387,6 +453,9 @@ void SubPrimOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OpFoldResult MulPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   // mul(x, 0) -> 0
   //
   // This is legal because it aligns with the Scala FIRRTL Compiler
@@ -402,6 +471,9 @@ OpFoldResult MulPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult DivPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   /// div(x, x) -> 1
   ///
   /// Division by zero is undefined in the FIRRTL specification.  This fold
@@ -445,6 +517,9 @@ OpFoldResult DivPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult RemPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   // rem(x, x) -> 0
   //
   // Division by zero is undefined in the FIRRTL specification.  This fold
@@ -473,18 +548,24 @@ OpFoldResult RemPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult DShlPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
   return constFoldFIRRTLBinaryOp(
       *this, adaptor.getOperands(), BinOpKind::DivideOrShift,
       [=](const APSInt &a, const APSInt &b) -> APInt { return a.shl(b); });
 }
 
 OpFoldResult DShlwPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
   return constFoldFIRRTLBinaryOp(
       *this, adaptor.getOperands(), BinOpKind::DivideOrShift,
       [=](const APSInt &a, const APSInt &b) -> APInt { return a.shl(b); });
 }
 
 OpFoldResult DShrPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
   return constFoldFIRRTLBinaryOp(
       *this, adaptor.getOperands(), BinOpKind::DivideOrShift,
       [=](const APSInt &a, const APSInt &b) -> APInt {
@@ -496,6 +577,9 @@ OpFoldResult DShrPrimOp::fold(FoldAdaptor adaptor) {
 // TODO: Move to DRR.
 OpFoldResult AndPrimOp::fold(FoldAdaptor adaptor) {
   if (auto rhsCst = getConstant(adaptor.getRhs())) {
+    SmallVector<Attribute> operandStorage;
+    updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
     /// and(x, 0) -> 0, 0 is largest or is implicit zero extended
     if (rhsCst->isZero())
       return getIntZerosAttr(getType());
@@ -534,6 +618,9 @@ void AndPrimOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OpFoldResult OrPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   if (auto rhsCst = getConstant(adaptor.getRhs())) {
     /// or(x, 0) -> x
     if (rhsCst->isZero() && getLhs().getType() == getType())
@@ -572,6 +659,9 @@ void OrPrimOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OpFoldResult XorPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   /// xor(x, 0) -> x
   if (auto rhsCst = getConstant(adaptor.getRhs()))
     if (rhsCst->isZero() && getLhs().getType() == getType())
@@ -604,6 +694,9 @@ void LEQPrimOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OpFoldResult LEQPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   bool isUnsigned = getLhs().getType().isa<UIntType>();
 
   // leq(x, x) -> 1
@@ -649,6 +742,9 @@ void LTPrimOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OpFoldResult LTPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   bool isUnsigned = getLhs().getType().isa<UIntType>();
 
   // lt(x, x) -> 0
@@ -700,6 +796,9 @@ void GEQPrimOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OpFoldResult GEQPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   bool isUnsigned = getLhs().getType().isa<UIntType>();
 
   // geq(x, x) -> 1
@@ -751,6 +850,9 @@ void GTPrimOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OpFoldResult GTPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   bool isUnsigned = getLhs().getType().isa<UIntType>();
 
   // gt(x, x) -> 0
@@ -791,6 +893,9 @@ OpFoldResult GTPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult EQPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   // eq(x, x) -> 1
   if (getLhs() == getRhs())
     return getIntAttr(getType(), APInt(1, 1));
@@ -843,6 +948,9 @@ LogicalResult EQPrimOp::canonicalize(EQPrimOp op, PatternRewriter &rewriter) {
 }
 
 OpFoldResult NEQPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   // neq(x, x) -> 0
   if (getLhs() == getRhs())
     return getIntAttr(getType(), APInt(1, 0));
@@ -907,6 +1015,9 @@ OpFoldResult SizeOfIntrinsicOp::fold(FoldAdaptor) {
 }
 
 OpFoldResult IsXIntrinsicOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   // No constant can be 'x' by definition.
   if (auto cst = getConstant(adaptor.getArg()))
     return getIntAttr(getType(), APInt(1, 0));
@@ -914,6 +1025,9 @@ OpFoldResult IsXIntrinsicOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult AsSIntPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   // No effect.
   if (getInput().getType() == getType())
     return getInput();
@@ -929,6 +1043,9 @@ OpFoldResult AsSIntPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult AsUIntPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   // No effect.
   if (getInput().getType() == getType())
     return getInput();
@@ -944,6 +1061,9 @@ OpFoldResult AsUIntPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult AsAsyncResetPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   // No effect.
   if (getInput().getType() == getType())
     return getInput();
@@ -956,6 +1076,9 @@ OpFoldResult AsAsyncResetPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult AsClockPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   // No effect.
   if (getInput().getType() == getType())
     return getInput();
@@ -968,6 +1091,9 @@ OpFoldResult AsClockPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult CvtPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   if (!hasKnownWidthIntTypes(*this))
     return {};
 
@@ -980,6 +1106,9 @@ OpFoldResult CvtPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult NegPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   if (!hasKnownWidthIntTypes(*this))
     return {};
 
@@ -993,6 +1122,9 @@ OpFoldResult NegPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult NotPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   if (!hasKnownWidthIntTypes(*this))
     return {};
 
@@ -1004,6 +1136,9 @@ OpFoldResult NotPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult AndRPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   if (!hasKnownWidthIntTypes(*this))
     return {};
 
@@ -1023,6 +1158,9 @@ OpFoldResult AndRPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult OrRPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   if (!hasKnownWidthIntTypes(*this))
     return {};
 
@@ -1042,6 +1180,9 @@ OpFoldResult OrRPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult XorRPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   if (!hasKnownWidthIntTypes(*this))
     return {};
 
@@ -1064,6 +1205,9 @@ OpFoldResult XorRPrimOp::fold(FoldAdaptor adaptor) {
 //===----------------------------------------------------------------------===//
 
 OpFoldResult CatPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   // cat(x, 0-width) -> x
   // cat(0-width, x) -> x
   // Limit to unsigned (result type), as cannot insert cast here.
@@ -1128,6 +1272,9 @@ void CatPrimOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OpFoldResult BitCastOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   auto op = (*this);
   // BitCast is redundant if input and result types are same.
   if (op.getType() == op.getInput().getType())
@@ -1142,7 +1289,23 @@ OpFoldResult BitCastOp::fold(FoldAdaptor adaptor) {
   return {};
 }
 
+// OpFoldResult ConstCastOp::fold(FoldAdaptor adaptor) {
+//   if (auto input = adaptor.getInput()) {
+//     // for (auto *user : getResult().getUsers()) {
+//     //   if (isa<mlir::InferTypeOpInterface>(user))
+//     //     return input;
+//     // }
+//     for (auto &use : getResult().getUses()) {
+//       auto *op = use.getOwner();
+//     }
+//   }
+//   return {};
+// }
+
 OpFoldResult BitsPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   auto inputType = getInput().getType().cast<FIRRTLBaseType>();
   // If we are extracting the entire input, then return it.
   if (inputType == getType() && getType().hasWidth())
@@ -1181,6 +1344,8 @@ static void replaceWithBits(Operation *op, Value value, unsigned hiBit,
 }
 
 OpFoldResult MuxPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
 
   // mux : UInt<0> -> 0
   if (getType().getBitWidthOrSentinel() == 0)
@@ -1277,6 +1442,9 @@ void MuxPrimOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OpFoldResult PadPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   auto input = this->getInput();
 
   // pad(x) -> x  if the width doesn't change.
@@ -1304,6 +1472,9 @@ OpFoldResult PadPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult ShlPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   auto input = this->getInput();
   auto inputType = input.getType().cast<IntType>();
   int shiftAmount = getAmount();
@@ -1325,6 +1496,9 @@ OpFoldResult ShlPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult ShrPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   auto input = this->getInput();
   auto inputType = input.getType().cast<IntType>();
   int shiftAmount = getAmount();
@@ -1396,6 +1570,9 @@ LogicalResult HeadPrimOp::canonicalize(HeadPrimOp op,
 }
 
 OpFoldResult HeadPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   if (hasKnownWidthIntTypes(*this))
     if (auto cst = getConstant(adaptor.getInput())) {
       int shiftAmount =
@@ -1408,6 +1585,9 @@ OpFoldResult HeadPrimOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult TailPrimOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   if (hasKnownWidthIntTypes(*this))
     if (auto cst = getConstant(adaptor.getInput()))
       return getIntAttr(getType(), cst->trunc(getType().getWidthOrSentinel()));
@@ -1435,6 +1615,9 @@ void SubaccessOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OpFoldResult MultibitMuxOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   // If there is only one input, just return it.
   if (adaptor.getInputs().size() == 1)
     return getOperand(1);
@@ -1721,6 +1904,9 @@ struct NodeBypass : public mlir::RewritePattern {
 
 // Interesting names and symbols and don't touch force nodes to stick around.
 OpFoldResult NodeOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   if (!hasDroppableName())
     return {};
   if (hasDontTouch(getResult())) // handles inner symbols
@@ -1852,6 +2038,9 @@ void SubindexOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OpFoldResult SubindexOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   auto attr = adaptor.getInput().dyn_cast_or_null<ArrayAttr>();
   if (!attr)
     return {};
@@ -1859,6 +2048,9 @@ OpFoldResult SubindexOp::fold(FoldAdaptor adaptor) {
 }
 
 OpFoldResult SubfieldOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
+
   auto attr = adaptor.getInput().dyn_cast_or_null<ArrayAttr>();
   if (!attr)
     return {};
@@ -1880,10 +2072,14 @@ static Attribute collectFields(MLIRContext *context,
 }
 
 OpFoldResult BundleCreateOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
   return collectFields(getContext(), adaptor.getOperands());
 }
 
 OpFoldResult VectorCreateOp::fold(FoldAdaptor adaptor) {
+  SmallVector<Attribute> operandStorage;
+  updateFoldAdaptorForConstCast(*this, adaptor, operandStorage);
   return collectFields(getContext(), adaptor.getOperands());
 }
 

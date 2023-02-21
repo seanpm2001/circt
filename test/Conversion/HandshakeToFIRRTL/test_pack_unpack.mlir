@@ -54,7 +54,7 @@ handshake.func @test_pack(%arg0: i64, %arg1: i32, %ctrl: none, ...) -> (tuple<i6
 // CHECK:  firrtl.connect %[[OUT1_DATA]], %[[VAL_10]] : !firrtl.uint<32>, !firrtl.uint<32>
 
 
-// CHECK:  %[[VAL_11:.*]] = firrtl.constant 0 : !firrtl.uint<1>
+// CHECK:  %[[VAL_11:.*]] = firrtl.constant 0 : !firrtl.const.uint<1>
 // CHECK:  %[[VAL_12:.*]] = firrtl.wire  : !firrtl.uint<1>
 // CHECK:  %[[VAL_13:.*]] = firrtl.wire  : !firrtl.uint<1>
 // CHECK:  %[[VAL_14:.*]] = firrtl.wire  : !firrtl.uint<1>
@@ -66,7 +66,7 @@ handshake.func @test_pack(%arg0: i64, %arg1: i32, %ctrl: none, ...) -> (tuple<i6
 // CHECK:  firrtl.connect %[[VAL_16]], %[[VAL_17]] : !firrtl.uint<1>, !firrtl.uint<1>
 
 // Result 0 logic.
-// CHECK:  %[[VAL_18:.*]] = firrtl.regreset %[[CLOCK]], %[[RESET]], %[[VAL_11]]  : !firrtl.clock, !firrtl.uint<1>, !firrtl.uint<1>, !firrtl.uint<1>
+// CHECK:  %[[VAL_18:.*]] = firrtl.regreset %[[CLOCK]], %[[RESET]], %[[VAL_11]]  : !firrtl.clock, !firrtl.uint<1>, !firrtl.const.uint<1>, !firrtl.uint<1>
 // CHECK:  %[[VAL_19:.*]] = firrtl.and %[[VAL_12]], %[[VAL_16]] : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
 // CHECK:  firrtl.connect %[[VAL_18]], %[[VAL_19]] : !firrtl.uint<1>, !firrtl.uint<1>
 // CHECK:  %[[VAL_20:.*]] = firrtl.wire  : !firrtl.uint<1>

@@ -428,8 +428,8 @@ firrtl.circuit "InterfaceGroundType" attributes {
       ]
     } : !firrtl.uint<0>
 
-    %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
-    %c-1_si2 = firrtl.constant -1 : !firrtl.sint<2>
+    %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
+    %c-1_si2 = firrtl.constant -1 : !firrtl.const.sint<2>
 
     %node_c0_ui1 = firrtl.node %c0_ui1 {
       annotations = [
@@ -1017,8 +1017,8 @@ firrtl.circuit "Top" attributes {
     } : !firrtl.uint<2>
   }
   firrtl.module private @DUT() {
-    %c0_ui2 = firrtl.constant 0 : !firrtl.uint<2>
-    %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
+    %c0_ui2 = firrtl.constant 0 : !firrtl.const.uint<2>
+    %c0_ui1 = firrtl.constant 0 : !firrtl.const.uint<1>
     %a_w1 = firrtl.wire   {annotations = [{class = "firrtl.transforms.DontTouchAnnotation"}]} : !firrtl.uint<1>
     firrtl.strictconnect %a_w1, %c0_ui1 : !firrtl.uint<1>
     %a_w2 = firrtl.wire   {annotations = [{class = "firrtl.transforms.DontTouchAnnotation"}]} : !firrtl.uint<2>

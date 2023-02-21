@@ -94,6 +94,9 @@ struct ConvertToConst
 
   LogicalResult matchAndRewrite(mlir::InferTypeOpInterface op,
                                 PatternRewriter &rewriter) const override {
+    if (isa<ConstCastOp>(op))
+      return failure();
+
     SmallVector<Value> constOperands;
     constOperands.reserve(op->getNumOperands());
     for (auto operand : op->getOperands()) {
