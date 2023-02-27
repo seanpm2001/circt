@@ -21,6 +21,7 @@
 #include "circt/Dialect/Comb/CombDialect.h"
 #include "circt/Dialect/Comb/CombVisitors.h"
 #include "circt/Dialect/HW/HWAttributes.h"
+#include "circt/Dialect/HW/HWInstanceGraph.h"
 #include "circt/Dialect/HW/HWTypes.h"
 #include "circt/Dialect/HW/HWVisitors.h"
 #include "circt/Dialect/SV/SVAttributes.h"
@@ -38,6 +39,7 @@
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
 #include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -3942,12 +3944,12 @@ LogicalResult StmtEmitter::visitSV(CaseOp op) {
 
 LogicalResult StmtEmitter::visitStmt(InstanceOp op) {
   startStatement();
-  bool doNotPrint = op->hasAttr("doNotPrint");
-  if (doNotPrint) {
-    ps << PP::ibox2
-       << "/* This instance is elsewhere emitted as a bind statement."
-       << PP::newline;
-  }
+  // bool doNotPrint = op->hasAttr("doNotPrint");
+  // if (doNotPrint) {
+  //   ps << PP::ibox2
+  //      << "/* This instance is elsewhere emitted as a bind statement."
+  //      << PP::newline;
+  // }
 
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
@@ -4104,12 +4106,12 @@ LogicalResult StmtEmitter::visitStmt(InstanceOp op) {
   }
   ps << ");";
   emitLocationInfoAndNewLine(ops);
-  if (doNotPrint) {
-    ps << PP::end;
-    startStatement();
-    ps << "*/";
-    setPendingNewline();
-  }
+  // if (doNotPrint) {
+  //   ps << PP::end;
+  //   startStatement();
+  //   ps << "*/";
+  //   setPendingNewline();
+  // }
   return success();
 }
 
@@ -4124,8 +4126,8 @@ LogicalResult StmtEmitter::visitStmt(ProbeOp op) { return success(); }
 // regs, or ports, with legalized names, so we can lookup up the names through
 // the IR.
 LogicalResult StmtEmitter::visitSV(BindOp op) {
-  emitter.emitBind(op);
-  assert(state.pendingNewline);
+  // emitter.emitBind(op);
+  // assert(state.pendingNewline);
   return success();
 }
 
@@ -4515,6 +4517,7 @@ void ModuleEmitter::emitBind(BindOp op) {
 
   InstanceOp inst = op.getReferencedInstance(&state.symbolCache);
 
+return;
   HWModuleOp parentMod = inst->getParentOfType<hw::HWModuleOp>();
   auto parentVerilogName = getVerilogModuleNameAttr(parentMod);
 
@@ -4522,6 +4525,12 @@ void ModuleEmitter::emitBind(BindOp op) {
   auto childVerilogName = getVerilogModuleNameAttr(childMod);
 
   startStatement();
+  ps << PPExtString("`ifndef ") << PPExtString(parentVerilogName.getValue())
+     << PPExtString("_") << PPExtString(childVerilogName.getValue())
+     << PP::newline;
+  ps << PPExtString("`define ") << PPExtString(parentVerilogName.getValue())
+     << PPExtString("_") << PPExtString(childVerilogName.getValue())
+     << PP::newline;
   ps << "bind " << PPExtString(parentVerilogName.getValue()) << PP::nbsp
      << PPExtString(childVerilogName.getValue()) << PP::nbsp
      << PPExtString(getSymOpName(inst)) << " (";
@@ -4608,7 +4617,7 @@ void ModuleEmitter::emitBind(BindOp op) {
   });
   if (!isFirst)
     ps << PP::newline;
-  ps << ");";
+  ps << ");\n`endif";
   setPendingNewline();
 }
 
@@ -4890,7 +4899,15 @@ void ModuleEmitter::emitHWModule(HWModuleOp module) {
     setPendingNewline();
   }
 
+  SmallVector<std::string> m = {/*"FEU",*/ "FEX", "IEX", "LSU",
+                                "TilePRCIDomain"};
+
   assert(state.pendingNewline);
+  for (auto c : m)
+    if (module.moduleName().ends_with(c)) {
+      ps << "/*verilator hier_block*/";
+      break;
+    }
 
   // Emit the body of the module.
   StmtEmitter(*this).emitStatementBlock(*module.getBodyBlock());
@@ -5433,6 +5450,59 @@ struct ExportSplitVerilogPass
   void runOnOperation() override {
     // Prepare the ops in the module for emission.
     mlir::OpPassManager preparePM("builtin.module");
+    circt::hw::InstanceGraph &instanceGraph =
+        getAnalysis<circt::hw::InstanceGraph>();
+
+    auto moduleOp = getOperation();
+    llvm::DenseMap<StringAttr, unsigned> count;
+    llvm::DenseMap<StringAttr, unsigned> countNum;
+    llvm::SmallVector<std::tuple<unsigned, unsigned, HWModuleOp>> costs;
+
+    SmallVector<InstanceGraphNode*> nodes;
+    for (auto *node : llvm::post_order(&instanceGraph))
+    nodes.push_back(node);
+    for(auto *node: llvm::reverse(nodes))
+      if (node->getModule())
+        if (auto module = dyn_cast_or_null<HWModuleOp>(*node->getModule())) {
+          if (countNum.count(getVerilogModuleNameAttr(module))) {
+          } else {
+            countNum[getVerilogModuleNameAttr(module)] = 1;
+          }
+          module.walk([&](InstanceOp instance) {
+            countNum[instance.referencedModuleNameAttr()] +=
+                countNum[getVerilogModuleNameAttr(module)];
+          });
+        }
+    // constant outputs.
+    for (auto *node : llvm::post_order(&instanceGraph))
+      if (node->getModule())
+        if (auto module = dyn_cast_or_null<HWModuleOp>(*node->getModule())) {
+          unsigned c = 0;
+          module.walk([&](Operation *op) {
+            auto instance = dyn_cast<InstanceOp>(op);
+            if (!instance) {
+              c++;
+              return;
+            }
+            c += count[instance.referencedModuleNameAttr()];
+          });
+          count[getVerilogModuleNameAttr(module)] = c;
+          costs.emplace_back(countNum[getVerilogModuleNameAttr(module)] * c,
+                             countNum[getVerilogModuleNameAttr(module)],
+                             module);
+        }
+    std::sort(costs.begin(), costs.end());
+    unsigned marked = 0;
+    for (auto [a, c, mod] : llvm::reverse(costs)) {
+      if (c > 1 && marked++ < 30) {
+        OpBuilder builder = OpBuilder::atBlockBegin(mod.getBodyBlock());
+        builder.create<sv::VerbatimOp>(mod.getLoc(),
+                                       "/*verilator hier_block*/");
+        mlir::emitWarning(mod.getLoc())
+            << getVerilogModuleNameAttr(mod) << a << c << " hier_block";
+      }
+    }
+
     auto &modulePM = preparePM.nest<hw::HWModuleOp>();
     modulePM.addPass(createPrepareForEmissionPass());
     if (failed(runPipeline(preparePM, getOperation())))
