@@ -14,6 +14,7 @@
 #include "PassDetails.h"
 #include "circt/Dialect/FIRRTL/FIRRTLAnnotations.h"
 #include "circt/Dialect/FIRRTL/FIRRTLAttributes.h"
+#include "circt/Dialect/FIRRTL/FIRRTLFieldSource.h"
 #include "circt/Dialect/FIRRTL/FIRRTLInstanceGraph.h"
 #include "circt/Dialect/FIRRTL/FIRRTLUtils.h"
 #include "circt/Dialect/FIRRTL/Passes.h"
@@ -184,8 +185,16 @@ static llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
   return os << "<" << lattice.getConstant() << ">";
 }
 
+LLVM_ATTRIBUTE_USED
+static llvm::raw_ostream &
+operator<<(llvm::raw_ostream &os,
+           llvm::PointerUnion<const FieldSource::PathNode *, Value> &key) {
+  return os << key;
+}
+
 namespace {
 struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
+  using Key = llvm::PointerUnion<const FieldSource::PathNode *, Value>;
 
   void runOnOperation() override;
   void rewriteModuleBody(FModuleOp module);
@@ -195,14 +204,14 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
     return executableBlocks.count(block);
   }
 
-  bool isOverdefined(Value value) const {
+  bool isOverdefined(Key value) const {
     auto it = latticeValues.find(value);
     return it != latticeValues.end() && it->second.isOverdefined();
   }
 
   /// Mark the given value as overdefined. This means that we cannot refine a
   /// specific constant for this value.
-  void markOverdefined(Value value) {
+  void markOverdefined(Key value) {
     auto &entry = latticeValues[value];
     if (!entry.isOverdefined()) {
       LLVM_DEBUG({
@@ -213,9 +222,12 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
     }
   }
 
+  void markOverdefined(Value value) { markOverdefined(getKey(value)); }
+  void markUnwritten(Value value) { markUnwritten(getKey(value)); }
+
   /// Mark the given value as overdefined. This means that we cannot refine a
   /// specific constant for this value.
-  void markUnwritten(Value value) {
+  void markUnwritten(Key value) {
     auto &entry = latticeValues[value];
     if (!entry.isUnwritten()) {
       LLVM_DEBUG({
@@ -229,7 +241,7 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
   /// Merge information from the 'from' lattice value into value.  If it
   /// changes, then users of the value are added to the worklist for
   /// revisitation.
-  void mergeLatticeValue(Value value, LatticeValue &valueEntry,
+  void mergeLatticeValue(Key value, LatticeValue &valueEntry,
                          LatticeValue source) {
     if (valueEntry.mergeIn(source)) {
       LLVM_DEBUG({
@@ -239,13 +251,15 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
       changedLatticeValueWorklist.push_back(value);
     }
   }
-  void mergeLatticeValue(Value value, LatticeValue source) {
+
+  void mergeLatticeValue(Key value, LatticeValue source) {
     // Don't even do a map lookup if from has no info in it.
     if (source.isUnknown())
       return;
     mergeLatticeValue(value, latticeValues[value], source);
   }
-  void mergeLatticeValue(Value result, Value from) {
+
+  void mergeLatticeValue(Key result, Key from) {
     // If 'from' hasn't been computed yet, then it is unknown, don't do
     // anything.
     auto it = latticeValues.find(from);
@@ -254,12 +268,21 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
     mergeLatticeValue(result, it->second);
   }
 
+  void mergeLatticeValue(Value result, Value from) {
+    // If 'from' hasn't been computed yet, then it is unknown, don't do
+    // anything.
+    auto it = latticeValues.find(getKey(from));
+    if (it == latticeValues.end())
+      return;
+    mergeLatticeValue(getKey(result), it->second);
+  }
+
   /// setLatticeValue - This is used when a new LatticeValue is computed for
   /// the result of the specified value that replaces any previous knowledge,
   /// e.g. because a fold() function on an op returned a new thing.  This should
   /// not be used on operations that have multiple contributors to it, e.g.
   /// wires or ports.
-  void setLatticeValue(Value value, LatticeValue source) {
+  void setLatticeValue(Key value, LatticeValue source) {
     // Don't even do a map lookup if from has no info in it.
     if (source.isUnknown())
       return;
@@ -295,24 +318,38 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
   void visitNode(NodeOp node);
   void visitOperation(Operation *op);
 
+  Key getKeyAsValue(Value value) {
+    assert(!fieldSource->nodeForValue(value));
+    return value;
+  }
+
+  Key getKey(Value value) {
+    auto node = fieldSource->nodeForValue(value);
+    if (node)
+      return node;
+    return value;
+  }
+
 private:
   /// This is the current instance graph for the Circuit.
   InstanceGraph *instanceGraph = nullptr;
 
   /// This keeps track of the current state of each tracked value.
-  DenseMap<Value, LatticeValue> latticeValues;
+  DenseMap<Key, LatticeValue> latticeValues;
 
   /// The set of blocks that are known to execute, or are intrinsically live.
   SmallPtrSet<Block *, 16> executableBlocks;
 
   /// A worklist of values whose LatticeValue recently changed, indicating the
   /// users need to be reprocessed.
-  SmallVector<Value, 64> changedLatticeValueWorklist;
+  SmallVector<Key, 64> changedLatticeValueWorklist;
 
   /// This keeps track of users the instance results that correspond to output
   /// ports.
   DenseMap<BlockArgument, llvm::TinyPtrVector<Value>>
       resultPortToInstanceResultMapping;
+
+  const firrtl::FieldSource *fieldSource;
 
 #ifndef NDEBUG
   /// A logger used to emit information during the application process.
@@ -340,10 +377,13 @@ void IMConstPropPass::runOnOperation() {
 
   // If a value changed lattice state then reprocess any of its users.
   while (!changedLatticeValueWorklist.empty()) {
-    Value changedVal = changedLatticeValueWorklist.pop_back_val();
-    for (Operation *user : changedVal.getUsers()) {
-      if (isBlockExecutable(user->getBlock()))
-        visitOperation(user);
+    Key changedKey = changedLatticeValueWorklist.pop_back_val();
+    ArrayRef<Value> keyToValues;
+    for (auto changedVal : keyToValues) {
+      for (Operation *user : changedVal.getUsers()) {
+        if (isBlockExecutable(user->getBlock()))
+          visitOperation(user);
+      }
     }
   }
 
@@ -362,7 +402,7 @@ void IMConstPropPass::runOnOperation() {
 /// Return the lattice value for the specified SSA value, extended to the width
 /// of the specified destType.  If allowTruncation is true, then this allows
 /// truncating the lattice value to the specified type.
-LatticeValue IMConstPropPass::getExtendedLatticeValue(Value value,
+LatticeValue IMConstPropPass::getExtendedLatticeValue(Key value,
                                                       FIRRTLBaseType destType,
                                                       bool allowTruncation) {
   // If 'value' hasn't been computed yet, then it is unknown.
@@ -457,11 +497,12 @@ void IMConstPropPass::markMemOp(MemOp mem) {
 }
 
 void IMConstPropPass::markConstantOp(ConstantOp constant) {
-  mergeLatticeValue(constant, LatticeValue(constant.getValueAttr()));
+  mergeLatticeValue(getKeyAsValue(constant),
+                    LatticeValue(constant.getValueAttr()));
 }
 
 void IMConstPropPass::markSpecialConstantOp(SpecialConstantOp specialConstant) {
-  mergeLatticeValue(specialConstant,
+  mergeLatticeValue(getKeyAsValue(specialConstant),
                     LatticeValue(specialConstant.getValueAttr()));
 }
 
@@ -587,12 +628,6 @@ void IMConstPropPass::visitConnectLike(FConnectLike connect) {
 }
 
 void IMConstPropPass::visitRegResetOp(RegResetOp regReset) {
-  // If the reg has a non-ground type, then it is too complex for us to handle,
-  // mark it as overdefined.
-  // TODO: Eventually add a field-sensitive model.
-  if (!regReset.getType().getPassiveType().isGround())
-    return markOverdefined(regReset);
-
   // The reset value may be known - if so, merge it in if the enable is greater
   // than invalid.
   auto srcValue = getExtendedLatticeValue(
