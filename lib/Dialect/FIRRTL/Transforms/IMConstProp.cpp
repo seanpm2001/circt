@@ -276,6 +276,11 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
 
   void markOverdefined(Value value) {
     FieldRef fieldRef = getFieldRefFromValue(value);
+    auto firrtlType = value.getType().dyn_cast<FIRRTLType>();
+    if (!firrtlType) {
+      markOverdefined(getFieldRefFromValue(value));
+    }
+
     foreachFIRRTLGroundType(value.getType().cast<FIRRTLBaseType>(),
                             [&](unsigned fieldID, auto) {
                               markOverdefined(fieldRef.getSubField(fieldID));
