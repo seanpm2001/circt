@@ -82,35 +82,6 @@ static void foreachFIRRTLGroundType(
   recurse(recurse, type);
 }
 
-static void foreachFIRRTLGroundType(
-    FIRRTLBaseType type1, FIRRTLBaseType type2,
-    llvm::unique_function<void(unsigned, FIRRTLBaseType, FIRRTLBaseType)> fn) {
-  if (type1.isGround() && type2.isGround())
-    return fn(0, type1, type2);
-
-  unsigned fieldID = 0;
-  std::function<void(FIRRTLBaseType, FIRRTLBaseType)> recurse =
-      [&](FIRRTLBaseType type1, FIRRTLBaseType type2) {
-        TypeSwitch<FIRRTLBaseType>(type1)
-            .Case<BundleType>([&](BundleType bundle1) {
-              auto bundle2 = type2.cast<BundleType>();
-              for (size_t i = 0, e = bundle1.getNumElements(); i < e; ++i) {
-                fieldID++;
-                recurse(bundle1.getElementType(i), bundle2.getElementType(i));
-              }
-            })
-            .Case<FVectorType>([&](FVectorType vector1) {
-              auto vector2 = type2.cast<FVectorType>();
-              for (size_t i = 0, e = vector1.getNumElements(); i < e; ++i) {
-                fieldID++;
-                recurse(vector1.getElementType(), vector2.getElementType());
-              }
-            })
-            .Default([&](auto groundType) { fn(fieldID, type1, type2); });
-      };
-  recurse(type1, type2);
-}
-
 //===----------------------------------------------------------------------===//
 // Pass Infrastructure
 //===----------------------------------------------------------------------===//
@@ -275,7 +246,7 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
   }
 
   void markOverdefined(Value value) {
-    FieldRef fieldRef = getFieldRefFromValue(value);
+    FieldRef fieldRef = getOrCacheFieldRefFromValue(value);
     auto firrtlType = value.getType().dyn_cast<FIRRTLType>();
     if (!firrtlType) {
       markOverdefined(fieldRef);
@@ -316,14 +287,16 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
 
   llvm::DenseMap<Value, FieldRef> fieldRefs;
   FieldRef getOrCacheFieldRefFromValue(Value value) {
+    if (!value.getDefiningOp() || !isAggregate(value.getDefiningOp()))
+      return FieldRef(value, 0);
     auto &fieldRef = fieldRefs[value];
-    if (!fieldRef)
+    if (fieldRef)
       return fieldRef;
     return fieldRef = getFieldRefFromValue(value);
   }
 
   void markUnwritten(Value value) {
-    FieldRef fieldRef = getFieldRefFromValue(value);
+    FieldRef fieldRef = getOrCacheFieldRefFromValue(value);
     foreachFIRRTLGroundType(value.getType().cast<FIRRTLBaseType>(),
                             [&](unsigned fieldID, auto) {
                               markUnwritten(fieldRef.getSubField(fieldID));
@@ -363,13 +336,14 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
   void mergeLatticeValue(Value result, Value from) {
     // If 'from' hasn't been computed yet, then it is unknown, don't do
     // anything.
-    FieldRef fieldRefFrom = getFieldRefFromValue(from);
+    FieldRef fieldRefFrom = getOrCacheFieldRefFromValue(from);
     auto it = latticeValues.find(fieldRefFrom);
     if (it == latticeValues.end())
       return;
-    FieldRef fieldRefResult = getFieldRefFromValue(result);
+    FieldRef fieldRefResult = getOrCacheFieldRefFromValue(result);
     if (!result.getType().isa<FIRRTLType>())
-      return mergeLatticeValue(fieldRefResult, getFieldRefFromValue(from));
+      return mergeLatticeValue(fieldRefResult,
+                               getOrCacheFieldRefFromValue(from));
     foreachFIRRTLGroundType(
         result.getType().cast<FIRRTLType>(), [&](unsigned fieldID, auto) {
           mergeLatticeValue(fieldRefResult.getSubField(fieldID),
@@ -560,7 +534,7 @@ void IMConstPropPass::markBlockExecutable(Block *block) {
       markOverdefined(verbatim.getResult());
 
     for (auto operand : op.getOperands()) {
-      auto fieldRef = getFieldRefFromValue(operand);
+      auto fieldRef = getOrCacheFieldRefFromValue(operand);
       auto firrtlType = operand.getType().dyn_cast<FIRRTLType>();
       if (!firrtlType)
         continue;
@@ -593,12 +567,12 @@ void IMConstPropPass::markMemOp(MemOp mem) {
 }
 
 void IMConstPropPass::markConstantOp(ConstantOp constant) {
-  mergeLatticeValue(getFieldRefFromValue(constant),
+  mergeLatticeValue(getOrCacheFieldRefFromValue(constant),
                     LatticeValue(constant.getValueAttr()));
 }
 
 void IMConstPropPass::markSpecialConstantOp(SpecialConstantOp specialConstant) {
-  mergeLatticeValue(getFieldRefFromValue(specialConstant),
+  mergeLatticeValue(getOrCacheFieldRefFromValue(specialConstant),
                     LatticeValue(specialConstant.getValueAttr()));
 }
 
@@ -664,14 +638,15 @@ void IMConstPropPass::visitConnectLike(FConnectLike connect) {
     markOverdefined(connect.getSrc());
     return markOverdefined(connect.getDest());
   }
+
   FIRRTLBaseType baseType;
   if (auto refType = connect.getDest().getType().dyn_cast<RefType>())
     baseType = refType.getType();
   else
     baseType = connect.getDest().getType().cast<FIRRTLBaseType>();
 
-  auto fieldRefSrc = getFieldRefFromValue(connect.getSrc());
-  auto fieldRefDest = getFieldRefFromValue(connect.getDest());
+  auto fieldRefSrc = getOrCacheFieldRefFromValue(connect.getSrc());
+  auto fieldRefDest = getOrCacheFieldRefFromValue(connect.getDest());
 
   auto propagateElementLattice = [&](unsigned fieldID,
                                      FIRRTLBaseType destTypeFIRRTL) {
@@ -735,9 +710,9 @@ void IMConstPropPass::visitRegResetOp(RegResetOp regReset) {
   // The reset value may be known - if so, merge it in if the enable is greater
   // than invalid.
 
-  auto fieldRefReset = getFieldRefFromValue(regReset.getResetValue());
+  auto fieldRefReset = getOrCacheFieldRefFromValue(regReset.getResetValue());
   auto enable = getExtendedLatticeValue(
-      getFieldRefFromValue(regReset.getResetSignal()),
+      getOrCacheFieldRefFromValue(regReset.getResetSignal()),
       regReset.getResetSignal().getType().cast<FIRRTLBaseType>(),
       /*allowTruncation=*/true);
 
@@ -804,7 +779,7 @@ void IMConstPropPass::visitOperation(Operation *op) {
   // If all of the results of this operation are already overdefined (or if
   // there are no results) then bail out early: we've converged.
   auto isOverdefinedFn = [&](Value value) {
-    return isOverdefined(getFieldRefFromValue(value));
+    return isOverdefined(getOrCacheFieldRefFromValue(value));
   };
   if (llvm::all_of(op->getResults(), isOverdefinedFn))
     return;
@@ -814,7 +789,7 @@ void IMConstPropPass::visitOperation(Operation *op) {
   SmallVector<Attribute, 8> operandConstants;
   operandConstants.reserve(op->getNumOperands());
   for (Value operand : op->getOperands()) {
-    auto &operandLattice = latticeValues[getFieldRefFromValue(operand)];
+    auto &operandLattice = latticeValues[getOrCacheFieldRefFromValue(operand)];
 
     // If the operand is an unknown value, then we generally don't want to
     // process it - we want to wait until the value is resolved to by the SCCP
@@ -883,13 +858,14 @@ void IMConstPropPass::visitOperation(Operation *op) {
         resultLattice = LatticeValue::getOverdefined();
     } else { // Folding to an operand results in its value.
       resultLattice =
-          latticeValues[getFieldRefFromValue(foldResult.get<Value>())];
+          latticeValues[getOrCacheFieldRefFromValue(foldResult.get<Value>())];
     }
 
     // We do not "merge" the lattice value in, we set it.  This is because the
     // fold functions can produce different values over time, e.g. in the
     // presence of InvalidValue operands that get resolved to other constants.
-    setLatticeValue(getFieldRefFromValue(op->getResult(i)), resultLattice);
+    setLatticeValue(getOrCacheFieldRefFromValue(op->getResult(i)),
+                    resultLattice);
   }
 }
 
@@ -935,7 +911,7 @@ void IMConstPropPass::rewriteModuleBody(FModuleOp module) {
     };
 
     // TODO: Replace entire aggregate.
-    auto it = latticeValues.find(getFieldRefFromValue(value));
+    auto it = latticeValues.find(getOrCacheFieldRefFromValue(value));
     if (it == latticeValues.end() || it->second.isOverdefined() ||
         it->second.isUnknown())
       return false;
@@ -976,7 +952,7 @@ void IMConstPropPass::rewriteModuleBody(FModuleOp module) {
     if (auto connect = dyn_cast<FConnectLike>(op)) {
       if (auto *destOp = connect.getDest().getDefiningOp()) {
         if (isDeletableWireOrRegOrNode(destOp) &&
-            !isOverdefined(getFieldRefFromValue(connect.getDest()))) {
+            !isOverdefined(getOrCacheFieldRefFromValue(connect.getDest()))) {
           connect.erase();
           ++numErasedOp;
         }
