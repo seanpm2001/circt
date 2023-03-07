@@ -13,6 +13,7 @@ firrtl.circuit "VectorPropagation1" {
     %1 = firrtl.subindex %tmp[1] : !firrtl.vector<uint<1>, 2>
     firrtl.strictconnect %1, %c1_ui1 : !firrtl.uint<1>
     %2 = firrtl.xor %0, %1 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
+    // CHECK: firrtl.strictconnect %b, %c0_ui1 : !firrtl.uint<1>
     firrtl.strictconnect %b, %2 : !firrtl.uint<1>
   }
 }
@@ -62,6 +63,9 @@ firrtl.circuit "VectorPropagation2" {
     firrtl.strictconnect %b2, %10 : !firrtl.uint<6>
     %11 = firrtl.xor %7, %5 : (!firrtl.uint<6>, !firrtl.uint<6>) -> !firrtl.uint<6>
     firrtl.strictconnect %b3, %11 : !firrtl.uint<6>
+    // CHECK:      firrtl.strictconnect %b1, %c5_ui6 : !firrtl.uint<6>
+    // CHECK-NEXT: firrtl.strictconnect %b2, %c34_ui6 : !firrtl.uint<6>
+    // CHECK-NEXT: firrtl.strictconnect %b3, %c24_ui6 : !firrtl.uint<6>
   }
 }
 
@@ -83,6 +87,7 @@ firrtl.circuit "BundlePropagation1"   {
     %3 = firrtl.xor %0, %1 : (!firrtl.uint<3>, !firrtl.uint<3>) -> !firrtl.uint<3>
     %4 = firrtl.xor %3, %2 : (!firrtl.uint<3>, !firrtl.uint<3>) -> !firrtl.uint<3>
     firrtl.strictconnect %result, %4 : !firrtl.uint<3>
+    // CHECK:  firrtl.strictconnect %result, %c7_ui3 : !firrtl.uint<3>
   }
 }
 
