@@ -47,9 +47,9 @@ static bool isDeletableWireOrRegOrNode(Operation *op) {
 }
 
 /// This function recursively applies `fn` to leaf ground types of `type`.
-static void foreachFIRRTLGroundType(
-    FIRRTLType firrtlType,
-    llvm::function_ref<void(unsigned, FIRRTLBaseType)> fn) {
+static void
+foreachFIRRTLGroundType(FIRRTLType firrtlType,
+                        llvm::function_ref<void(unsigned, FIRRTLBaseType)> fn) {
   auto type = firrtlType.dyn_cast<FIRRTLBaseType>();
   if (!type)
     type = firrtlType.cast<RefType>().getType();
@@ -524,14 +524,16 @@ void IMConstPropPass::markBlockExecutable(Block *block) {
     else if (auto verbatim = dyn_cast<VerbatimWireOp>(op))
       markOverdefined(verbatim.getResult());
 
-    for (auto operand : op.getOperands()) {
-      auto fieldRef = getOrCacheFieldRefFromValue(operand);
-      auto firrtlType = operand.getType().dyn_cast<FIRRTLType>();
-      if (!firrtlType)
-        continue;
-      foreachFIRRTLGroundType(firrtlType, [&](unsigned fieldID, auto type) {
-        fieldRefToUsers[fieldRef.getSubField(fieldID)].push_back(&op);
-      });
+    if (!isAggregate(&op)) {
+      for (auto operand : op.getOperands()) {
+        auto fieldRef = getOrCacheFieldRefFromValue(operand);
+        auto firrtlType = operand.getType().dyn_cast<FIRRTLType>();
+        if (!firrtlType)
+          continue;
+        foreachFIRRTLGroundType(firrtlType, [&](unsigned fieldID, auto type) {
+          fieldRefToUsers[fieldRef.getSubField(fieldID)].push_back(&op);
+        });
+      }
     }
   }
 }
