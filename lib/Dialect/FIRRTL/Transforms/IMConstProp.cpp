@@ -47,9 +47,9 @@ static bool isDeletableWireOrRegOrNode(Operation *op) {
 }
 
 /// This function recursively applies `fn` to leaf ground types of `type`.
-static void
-foreachFIRRTLGroundType(FIRRTLType firrtlType,
-                        llvm::function_ref<void(unsigned, FIRRTLBaseType)> fn) {
+static void foreachFIRRTLGroundType(
+    FIRRTLType firrtlType,
+    llvm::function_ref<void(unsigned, FIRRTLBaseType)> fn) {
   auto type = firrtlType.dyn_cast<FIRRTLBaseType>();
   if (!type)
     type = firrtlType.cast<RefType>().getType();
@@ -59,21 +59,18 @@ foreachFIRRTLGroundType(FIRRTLType firrtlType,
     return fn(0, type);
 
   unsigned fieldID = 0;
-  SmallVector<FIRRTLBaseType, 4> worklist;
-  worklist.push_back(type);
-  while (!worklist.empty()) {
-    auto type = worklist.pop_back_val();
+  auto recurse = [&](auto &&f, FIRRTLBaseType type) -> void {
     TypeSwitch<FIRRTLBaseType>(type)
         .Case<BundleType>([&](BundleType bundle) {
           for (size_t i = 0, e = bundle.getNumElements(); i < e; ++i) {
             fieldID++;
-            worklist.push_back(bundle.getElementType(i));
+            f(f, bundle.getElementType(i));
           }
         })
         .template Case<FVectorType>([&](FVectorType vector) {
           for (size_t i = 0, e = vector.getNumElements(); i < e; ++i) {
             fieldID++;
-            worklist.push_back(vector.getElementType());
+            f(f, vector.getElementType());
           }
         })
         .Default([&](auto groundType) {
@@ -81,7 +78,8 @@ foreachFIRRTLGroundType(FIRRTLType firrtlType,
                  "only ground types are expected here");
           fn(fieldID, groundType.template cast<FIRRTLBaseType>());
         });
-  }
+  };
+  recurse(recurse, type);
 }
 
 //===----------------------------------------------------------------------===//
@@ -526,16 +524,14 @@ void IMConstPropPass::markBlockExecutable(Block *block) {
     else if (auto verbatim = dyn_cast<VerbatimWireOp>(op))
       markOverdefined(verbatim.getResult());
 
-    if (!isAggregate(&op)) {
-      for (auto operand : op.getOperands()) {
-        auto fieldRef = getOrCacheFieldRefFromValue(operand);
-        auto firrtlType = operand.getType().dyn_cast<FIRRTLType>();
-        if (!firrtlType)
-          continue;
-        foreachFIRRTLGroundType(firrtlType, [&](unsigned fieldID, auto type) {
-          fieldRefToUsers[fieldRef.getSubField(fieldID)].push_back(&op);
-        });
-      }
+    for (auto operand : op.getOperands()) {
+      auto fieldRef = getOrCacheFieldRefFromValue(operand);
+      auto firrtlType = operand.getType().dyn_cast<FIRRTLType>();
+      if (!firrtlType)
+        continue;
+      foreachFIRRTLGroundType(firrtlType, [&](unsigned fieldID, auto type) {
+        fieldRefToUsers[fieldRef.getSubField(fieldID)].push_back(&op);
+      });
     }
   }
 }

@@ -128,7 +128,7 @@ firrtl.circuit "AggregateAsyncReset" {
     firrtl.strictconnect %res1, %2 : !firrtl.uint<3>
     firrtl.strictconnect %res2, %3 : !firrtl.uint<3>
     // CHECK:      firrtl.strictconnect %res1, %c1_ui3 : !firrtl.uint<3>
-    // CHECK_NEXT: firrtl.strictconnect %res2, %c2_ui3 : !firrtl.uint<3>
+    // CHECK-NEXT: firrtl.strictconnect %res2, %c2_ui3 : !firrtl.uint<3>
   }
 }
 
@@ -145,6 +145,7 @@ firrtl.circuit "AggregateRegReset" {
     %1 = firrtl.subindex %reg[0] : !firrtl.vector<uint<1>, 1>
     firrtl.strictconnect %1, %true : !firrtl.uint<1>
     firrtl.strictconnect %out, %1 : !firrtl.uint<1>
+    // CHECK: firrtl.strictconnect %out, %c1_ui1 : !firrtl.uint<1>
   }
 }
 
@@ -152,7 +153,6 @@ firrtl.circuit "AggregateRegReset" {
 
 firrtl.circuit "DontTouchAggregate" {
   firrtl.module @DontTouchAggregate(in %clock: !firrtl.clock, out %out1: !firrtl.uint<1>, out %out2: !firrtl.uint<1>) {
-    // fieldID 1 means the first element. Check that we don't propagate througth it.
     %init = firrtl.wire sym @dntSym: !firrtl.vector<uint<1>, 2>
     %0 = firrtl.subindex %init[0] : !firrtl.vector<uint<1>, 2>
     %1 = firrtl.subindex %init[1] : !firrtl.vector<uint<1>, 2>
@@ -160,6 +160,8 @@ firrtl.circuit "DontTouchAggregate" {
     firrtl.strictconnect %0, %true : !firrtl.uint<1>
     firrtl.strictconnect %1, %true : !firrtl.uint<1>
 
+    // CHECK:      firrtl.strictconnect %out1, %0 : !firrtl.uint<1>
+    // CHECK-NEXT: firrtl.strictconnect %out2, %1 : !firrtl.uint<1>
     firrtl.strictconnect %out1, %0 : !firrtl.uint<1>
     firrtl.strictconnect %out2, %1 : !firrtl.uint<1>
   }
