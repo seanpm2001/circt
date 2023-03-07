@@ -59,18 +59,18 @@ static void foreachFIRRTLGroundType(
     return fn(0, type);
 
   unsigned fieldID = 0;
-  std::function<void(FIRRTLBaseType)> recurse = [&](FIRRTLBaseType type) {
+  auto recurse = [&](auto &&f, FIRRTLBaseType type) -> void {
     TypeSwitch<FIRRTLBaseType>(type)
         .Case<BundleType>([&](BundleType bundle) {
           for (size_t i = 0, e = bundle.getNumElements(); i < e; ++i) {
             fieldID++;
-            recurse(bundle.getElementType(i));
+            f(f, bundle.getElementType(i));
           }
         })
-        .Case<FVectorType>([&](FVectorType vector) {
+        .template Case<FVectorType>([&](FVectorType vector) {
           for (size_t i = 0, e = vector.getNumElements(); i < e; ++i) {
             fieldID++;
-            recurse(vector.getElementType());
+            f(f, vector.getElementType());
           }
         })
         .Default([&](auto groundType) {
@@ -79,7 +79,7 @@ static void foreachFIRRTLGroundType(
           fn(fieldID, groundType.template cast<FIRRTLBaseType>());
         });
   };
-  recurse(type);
+  recurse(recurse, type);
 }
 
 static void foreachFIRRTLGroundType(
@@ -278,13 +278,13 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
     FieldRef fieldRef = getFieldRefFromValue(value);
     auto firrtlType = value.getType().dyn_cast<FIRRTLType>();
     if (!firrtlType) {
-      markOverdefined(getFieldRefFromValue(value));
+      markOverdefined(fieldRef);
+      return;
     }
 
-    foreachFIRRTLGroundType(value.getType().cast<FIRRTLBaseType>(),
-                            [&](unsigned fieldID, auto) {
-                              markOverdefined(fieldRef.getSubField(fieldID));
-                            });
+    foreachFIRRTLGroundType(firrtlType, [&](unsigned fieldID, auto) {
+      markOverdefined(fieldRef.getSubField(fieldID));
+    });
   }
 
   /// Mark the given value as overdefined. This means that we cannot refine a
@@ -293,7 +293,8 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
     auto &entry = latticeValues[value];
     if (!entry.isOverdefined()) {
       LLVM_DEBUG({
-        logger.getOStream() << "Setting overdefined : (" << value << ")\n";
+        logger.getOStream()
+            << "Setting overdefined : (" << getFieldName(value).first << ")\n";
       });
       entry.markOverdefined();
       changedLatticeValueWorklist.push_back(value);
@@ -313,11 +314,19 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
     }
   }
 
+  llvm::DenseMap<Value, FieldRef> fieldRefs;
+  FieldRef getOrCacheFieldRefFromValue(Value value) {
+    auto &fieldRef = fieldRefs[value];
+    if (!fieldRef)
+      return fieldRef;
+    return fieldRef = getFieldRefFromValue(value);
+  }
+
   void markUnwritten(Value value) {
     FieldRef fieldRef = getFieldRefFromValue(value);
     foreachFIRRTLGroundType(value.getType().cast<FIRRTLBaseType>(),
                             [&](unsigned fieldID, auto) {
-                              markOverdefined(fieldRef.getSubField(fieldID));
+                              markUnwritten(fieldRef.getSubField(fieldID));
                             });
   }
 
@@ -739,6 +748,7 @@ void IMConstPropPass::visitRegResetOp(RegResetOp regReset) {
       auto srcValue = getExtendedLatticeValue(
           fieldRefReset.getSubField(fieldID), destTypeFIRRTL,
           /*allowTruncation=*/true);
+
       mergeLatticeValue(FieldRef(regReset, fieldID), srcValue);
     };
 
@@ -787,7 +797,7 @@ void IMConstPropPass::visitOperation(Operation *op) {
     return visitNode(nodeOp);
 
   // The clock operand of regop changing doesn't change its result value.
-  if (isa<RegOp>(op))
+  if (isa<RegOp>(op) || isAggregate(op))
     return;
   // TODO: Handle 'when' operations.
 
