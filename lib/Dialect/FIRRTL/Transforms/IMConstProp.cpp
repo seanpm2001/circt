@@ -223,13 +223,6 @@ static llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
   return os << "<" << lattice.getConstant() << ">";
 }
 
-LLVM_ATTRIBUTE_USED
-static llvm::raw_ostream &
-operator<<(llvm::raw_ostream &os,
-           llvm::PointerUnion<const FieldSource::PathNode *, Value> &key) {
-  return os << key;
-}
-
 namespace {
 struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
   using Key = FieldRef;
@@ -415,8 +408,6 @@ private:
   /// ports.
   DenseMap<BlockArgument, llvm::TinyPtrVector<Value>>
       resultPortToInstanceResultMapping;
-
-  const firrtl::FieldSource *fieldSource;
 
 #ifndef NDEBUG
   /// A logger used to emit information during the application process.
@@ -620,8 +611,6 @@ void IMConstPropPass::markInstanceOp(InstanceOp instance) {
     // get handled when any connects to it are processed.
     if (fModule.getPortDirection(resultNo) == Direction::In)
       continue;
-    // We only support simple values so far.
-    auto portType = instancePortVal.getType().dyn_cast<FIRRTLBaseType>();
 
     // Otherwise we have a result from the instance.  We need to forward results
     // from the body to this instance result's SSA value, so remember it.

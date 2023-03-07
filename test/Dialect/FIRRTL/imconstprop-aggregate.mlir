@@ -127,6 +127,8 @@ firrtl.circuit "AggregateAsyncReset" {
     firrtl.strictconnect %3, %c2_ui3 : !firrtl.uint<3>
     firrtl.strictconnect %res1, %2 : !firrtl.uint<3>
     firrtl.strictconnect %res2, %3 : !firrtl.uint<3>
+    // CHECK:      firrtl.strictconnect %res1, %c1_ui3 : !firrtl.uint<3>
+    // CHECK_NEXT: firrtl.strictconnect %res2, %c2_ui3 : !firrtl.uint<3>
   }
 }
 
