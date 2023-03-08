@@ -208,7 +208,7 @@ firrtl.circuit "InputPortTop"  {
     in %in1: !firrtl.bundle<v: uint<1>> sym @dntSym,
     out %out: !firrtl.bundle<v: uint<1>>)
   {
-    // CHECK: firrtl.and %0, %1
+    // CHECK: firrtl.and %1, %0
     %0 = firrtl.subfield %in1[v] : !firrtl.bundle<v: uint<1>>
     %1 = firrtl.subfield %in0[v] : !firrtl.bundle<v: uint<1>>
     %2 = firrtl.subfield %out[v] : !firrtl.bundle<v: uint<1>>
@@ -248,7 +248,7 @@ firrtl.circuit "InputPortTop"  {
 //   - https://github.com/llvm/circt/issues/1488
 //
 firrtl.circuit "rhs_sink_output_used_as_wire" {
-  // CHECK: firrtl.module @Bar
+  // CHECK: firrtl.module private @Bar
   firrtl.module private @Bar(in %a: !firrtl.bundle<v: uint<1>>, in %b: !firrtl.bundle<v: uint<1>>, out %c: !firrtl.bundle<v: uint<1>>, out %d: !firrtl.bundle<v: uint<1>>) {
     %0 = firrtl.subfield %d[v] : !firrtl.bundle<v: uint<1>>
     %1 = firrtl.subfield %a[v] : !firrtl.bundle<v: uint<1>>
@@ -261,6 +261,8 @@ firrtl.circuit "rhs_sink_output_used_as_wire" {
     firrtl.strictconnect %4, %5 : !firrtl.uint<1>
     firrtl.strictconnect %0, %4 : !firrtl.uint<1>
   }
+
+  // CHECK: firrtl.module @rhs_sink_output_used_as_wire
   firrtl.module @rhs_sink_output_used_as_wire(in %a: !firrtl.bundle<v: uint<1>>, in %b: !firrtl.bundle<v: uint<1>>, out %c: !firrtl.bundle<v: uint<1>>, out %d: !firrtl.bundle<v: uint<1>>) {
     %bar_a, %bar_b, %bar_c, %bar_d = firrtl.instance bar  @Bar(in a: !firrtl.bundle<v: uint<1>>, in b: !firrtl.bundle<v: uint<1>>, out c: !firrtl.bundle<v: uint<1>>, out d: !firrtl.bundle<v: uint<1>>)
     %0 = firrtl.subfield %a[v] : !firrtl.bundle<v: uint<1>>
@@ -281,7 +283,7 @@ firrtl.circuit "rhs_sink_output_used_as_wire" {
 // -----
 // CHECK-LABEL: "Oscillators"
 firrtl.circuit "Oscillators"  {
-  // CHECK: firrtl.module @Foo
+  // CHECK-LABEL: firrtl.module private @Foo
   firrtl.module private @Foo(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset, out %a: !firrtl.bundle<v1: uint<1>, v2: uint<1>>) {
     %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
     %0 = firrtl.subfield %a[v2] : !firrtl.bundle<v1: uint<1>, v2: uint<1>>
@@ -297,7 +299,7 @@ firrtl.circuit "Oscillators"  {
     firrtl.strictconnect %0, %4 : !firrtl.uint<1>
   }
 
-  // CHECK: firrtl.module @Bar
+  // CHECK-LABEL: firrtl.module private @Bar
   firrtl.module private @Bar(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset, out %a: !firrtl.bundle<v1: uint<1>, v2: uint<1>>) {
     %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
     %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
@@ -313,7 +315,7 @@ firrtl.circuit "Oscillators"  {
     firrtl.strictconnect %1, %3 : !firrtl.uint<1>
   }
 
-  // CHECK: firrtl.module @Baz
+  // CHECK-LABEL: firrtl.module private @Baz
   firrtl.module private @Baz(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset, out %a: !firrtl.bundle<v1: uint<1>, v2: uint<1>>) {
     %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
     %0 = firrtl.subfield %a[v1] : !firrtl.bundle<v1: uint<1>, v2: uint<1>>
@@ -329,7 +331,7 @@ firrtl.circuit "Oscillators"  {
   }
   firrtl.extmodule @Ext(in a: !firrtl.bundle<v1: uint<1>, v2: uint<1>>)
 
-  // CHECK: firrtl.module @Qux
+  // CHECK: firrtl.module private @Qux
   firrtl.module private @Qux(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset, out %a: !firrtl.bundle<v1: uint<1>, v2: uint<1>>) {
     %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
     %0 = firrtl.subfield %a[v2] : !firrtl.bundle<v1: uint<1>, v2: uint<1>>
