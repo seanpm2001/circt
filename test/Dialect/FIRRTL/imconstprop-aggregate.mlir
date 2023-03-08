@@ -127,7 +127,8 @@ firrtl.circuit "AggregateAsyncReset" {
     firrtl.strictconnect %3, %c2_ui3 : !firrtl.uint<3>
     firrtl.strictconnect %res1, %2 : !firrtl.uint<3>
     firrtl.strictconnect %res2, %3 : !firrtl.uint<3>
-    // CHECK:      firrtl.strictconnect %res1, %c1_ui3 : !firrtl.uint<3>
+    // Check that only %res2 is optimized.
+    // CHECK:      firrtl.strictconnect %res1, %2 : !firrtl.uint<3>
     // CHECK-NEXT: firrtl.strictconnect %res2, %c2_ui3 : !firrtl.uint<3>
   }
 }
@@ -193,19 +194,21 @@ firrtl.circuit "OutPortTop" {
 // -----
 
 firrtl.circuit "InputPortTop"  {
-  // CHECK-LABEL: firrtl.module @InputPortChild2
-  firrtl.module @InputPortChild2(in %in0: !firrtl.bundle<v: uint<1>>, in %in1: !firrtl.bundle<v: uint<1>>, out %out: !firrtl.bundle<v: uint<1>>) {
+  // CHECK-LABEL: firrtl.module private @InputPortChild2
+  firrtl.module private @InputPortChild2(in %in0: !firrtl.bundle<v: uint<1>>, in %in1: !firrtl.bundle<v: uint<1>>, out %out: !firrtl.bundle<v: uint<1>>) {
+    // CHECK: firrtl.and %0, %c1_ui1
     %0 = firrtl.subfield %in1[v] : !firrtl.bundle<v: uint<1>>
     %1 = firrtl.subfield %in0[v] : !firrtl.bundle<v: uint<1>>
     %2 = firrtl.subfield %out[v] : !firrtl.bundle<v: uint<1>>
     %3 = firrtl.and %1, %0 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
     firrtl.strictconnect %2, %3 : !firrtl.uint<1>
   }
-  // CHECK-LABEL: firrtl.module @InputPortChild
-  firrtl.module @InputPortChild(in %in0: !firrtl.bundle<v: uint<1>>,
+  // CHECK-LABEL: firrtl.module private @InputPortChild
+  firrtl.module private @InputPortChild(in %in0: !firrtl.bundle<v: uint<1>>,
     in %in1: !firrtl.bundle<v: uint<1>> sym @dntSym,
     out %out: !firrtl.bundle<v: uint<1>>)
   {
+    // CHECK: firrtl.and %0, %1
     %0 = firrtl.subfield %in1[v] : !firrtl.bundle<v: uint<1>>
     %1 = firrtl.subfield %in0[v] : !firrtl.bundle<v: uint<1>>
     %2 = firrtl.subfield %out[v] : !firrtl.bundle<v: uint<1>>
@@ -239,9 +242,14 @@ firrtl.circuit "InputPortTop"  {
 // -----
 
 // CHECK-LABK: firrtl.circuit "rhs_sink_output_used_as_wire"
+// This test checks that an output port sink, used as a RHS of a connect, is not
+// optimized away.  This is similar to the oscillator tests above, but more
+// reduced. See:
+//   - https://github.com/llvm/circt/issues/1488
+//
 firrtl.circuit "rhs_sink_output_used_as_wire" {
   // CHECK: firrtl.module @Bar
-  firrtl.module @Bar(in %a: !firrtl.bundle<v: uint<1>>, in %b: !firrtl.bundle<v: uint<1>>, out %c: !firrtl.bundle<v: uint<1>>, out %d: !firrtl.bundle<v: uint<1>>) {
+  firrtl.module private @Bar(in %a: !firrtl.bundle<v: uint<1>>, in %b: !firrtl.bundle<v: uint<1>>, out %c: !firrtl.bundle<v: uint<1>>, out %d: !firrtl.bundle<v: uint<1>>) {
     %0 = firrtl.subfield %d[v] : !firrtl.bundle<v: uint<1>>
     %1 = firrtl.subfield %a[v] : !firrtl.bundle<v: uint<1>>
     %2 = firrtl.subfield %b[v] : !firrtl.bundle<v: uint<1>>
@@ -274,7 +282,7 @@ firrtl.circuit "rhs_sink_output_used_as_wire" {
 // CHECK-LABEL: "Oscillators"
 firrtl.circuit "Oscillators"  {
   // CHECK: firrtl.module @Foo
-  firrtl.module @Foo(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset, out %a: !firrtl.bundle<v1: uint<1>, v2: uint<1>>) {
+  firrtl.module private @Foo(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset, out %a: !firrtl.bundle<v1: uint<1>, v2: uint<1>>) {
     %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
     %0 = firrtl.subfield %a[v2] : !firrtl.bundle<v1: uint<1>, v2: uint<1>>
     %1 = firrtl.subfield %a[v1] : !firrtl.bundle<v1: uint<1>, v2: uint<1>>
@@ -290,7 +298,7 @@ firrtl.circuit "Oscillators"  {
   }
 
   // CHECK: firrtl.module @Bar
-  firrtl.module @Bar(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset, out %a: !firrtl.bundle<v1: uint<1>, v2: uint<1>>) {
+  firrtl.module private @Bar(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset, out %a: !firrtl.bundle<v1: uint<1>, v2: uint<1>>) {
     %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
     %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
     %0 = firrtl.subfield %a[v1] : !firrtl.bundle<v1: uint<1>, v2: uint<1>>
@@ -306,7 +314,7 @@ firrtl.circuit "Oscillators"  {
   }
 
   // CHECK: firrtl.module @Baz
-  firrtl.module @Baz(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset, out %a: !firrtl.bundle<v1: uint<1>, v2: uint<1>>) {
+  firrtl.module private @Baz(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset, out %a: !firrtl.bundle<v1: uint<1>, v2: uint<1>>) {
     %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
     %0 = firrtl.subfield %a[v1] : !firrtl.bundle<v1: uint<1>, v2: uint<1>>
     %1 = firrtl.subfield %a[v2] : !firrtl.bundle<v1: uint<1>, v2: uint<1>>
@@ -322,7 +330,7 @@ firrtl.circuit "Oscillators"  {
   firrtl.extmodule @Ext(in a: !firrtl.bundle<v1: uint<1>, v2: uint<1>>)
 
   // CHECK: firrtl.module @Qux
-  firrtl.module @Qux(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset, out %a: !firrtl.bundle<v1: uint<1>, v2: uint<1>>) {
+  firrtl.module private @Qux(in %clock: !firrtl.clock, in %reset: !firrtl.asyncreset, out %a: !firrtl.bundle<v1: uint<1>, v2: uint<1>>) {
     %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
     %0 = firrtl.subfield %a[v2] : !firrtl.bundle<v1: uint<1>, v2: uint<1>>
     %1 = firrtl.subfield %a[v1] : !firrtl.bundle<v1: uint<1>, v2: uint<1>>
@@ -391,7 +399,7 @@ firrtl.circuit "dntOutput"  {
     %2 = firrtl.mux(%c, %1, %c2_ui3) : (!firrtl.uint<1>, !firrtl.uint<3>, !firrtl.uint<3>) -> !firrtl.uint<3>
     firrtl.strictconnect %0, %2 : !firrtl.uint<3>
   }
-  firrtl.module @foo(out %b: !firrtl.bundle<v: uint<3>> sym @dntSym1){
+  firrtl.module private @foo(out %b: !firrtl.bundle<v: uint<3>> sym @dntSym1){
     %c1_ui3 = firrtl.constant 1 : !firrtl.uint<3>
     %0 = firrtl.subfield %b[v] : !firrtl.bundle<v: uint<3>>
     firrtl.strictconnect %0, %c1_ui3 : !firrtl.uint<3>
