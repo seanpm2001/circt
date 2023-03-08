@@ -9,10 +9,10 @@ firrtl.circuit "VectorPropagation1" {
     %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
     %tmp = firrtl.reg %clock  : !firrtl.vector<uint<1>, 2>
     %0 = firrtl.subindex %tmp[0] : !firrtl.vector<uint<1>, 2>
-    firrtl.strictconnect %0, %c1_ui1 : !firrtl.uint<1>
     %1 = firrtl.subindex %tmp[1] : !firrtl.vector<uint<1>, 2>
-    firrtl.strictconnect %1, %c1_ui1 : !firrtl.uint<1>
     %2 = firrtl.xor %0, %1 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
+    firrtl.strictconnect %0, %c1_ui1 : !firrtl.uint<1>
+    firrtl.strictconnect %1, %c1_ui1 : !firrtl.uint<1>
     // CHECK: firrtl.strictconnect %b, %c0_ui1 : !firrtl.uint<1>
     firrtl.strictconnect %b, %2 : !firrtl.uint<1>
   }

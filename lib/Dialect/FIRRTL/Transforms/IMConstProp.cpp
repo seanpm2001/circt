@@ -238,6 +238,11 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
     return it != latticeValues.end() && it->second.isOverdefined();
   }
 
+  bool isUnknown(Key value) const {
+    auto it = latticeValues.find(value);
+    return it == latticeValues.end() || it->second.isUnknown();
+  }
+
   void markOverdefined(Value value) {
     FieldRef fieldRef = getOrCacheFieldRefFromValue(value);
     auto firrtlType = value.getType().dyn_cast<FIRRTLType>();
@@ -268,6 +273,7 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
   /// Mark the given value as overdefined. This means that we cannot refine a
   /// specific constant for this value.
   void markUnwritten(Key value) {
+    return;
     auto &entry = latticeValues[value];
     if (!entry.isUnwritten()) {
       LLVM_DEBUG({
@@ -551,7 +557,7 @@ void IMConstPropPass::markWireOrRegOp(Operation *wireOrReg) {
     return markOverdefined(resultValue);
 
   // Otherwise, this starts out as UnWritten and is upgraded by connects.
-  markUnwritten(resultValue);
+  // markUnwritten(resultValue);
 }
 
 void IMConstPropPass::markMemOp(MemOp mem) {
@@ -942,8 +948,9 @@ void IMConstPropPass::rewriteModuleBody(FModuleOp module) {
     // Connects to values that we found to be constant can be dropped.
     if (auto connect = dyn_cast<FConnectLike>(op)) {
       if (auto *destOp = connect.getDest().getDefiningOp()) {
-        if (isDeletableWireOrRegOrNode(destOp) &&
-            !isOverdefined(getOrCacheFieldRefFromValue(connect.getDest()))) {
+        auto fieldRef = getOrCacheFieldRefFromValue(connect.getDest());
+        if (isDeletableWireOrRegOrNode(destOp) && !isOverdefined(fieldRef) &&
+            !isUnknown(fieldRef)) {
           connect.erase();
           ++numErasedOp;
         }
