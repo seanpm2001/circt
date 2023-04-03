@@ -977,6 +977,90 @@ void OrderedOutputOp::build(OpBuilder &builder, OperationState &result,
 }
 
 //===----------------------------------------------------------------------===//
+// ForOp
+//===----------------------------------------------------------------------===//
+
+void ForOp::build(OpBuilder &builder, OperationState &result,
+                  unsigned lowerBound, unsigned upperBound, unsigned step,
+                  IntegerType type, Location loc, StringRef name,
+                  std::function<void(BlockArgument)> body) {
+  OpBuilder::InsertionGuard guard(builder);
+  auto lowerValue = builder.create<hw::ConstantOp>(loc, type, lowerBound);
+  auto upperValue = builder.create<hw::ConstantOp>(loc, type, upperBound);
+  auto stepValue = builder.create<hw::ConstantOp>(loc, type, step);
+  build(builder, result, lowerValue, upperValue, stepValue, name);
+  auto *region = result.regions.front().get();
+  auto *block = builder.createBlock(region);
+  BlockArgument blockArgument = region->addArgument(type, loc);
+
+  if (body)
+    body(blockArgument);
+}
+
+void ForOp::getAsmBlockArgumentNames(mlir::Region &region,
+                                     mlir::OpAsmSetValueNameFn setNameFn) {
+  getAsmBlockArgumentNamesImpl(region, setNameFn);
+}
+
+ParseResult ForOp::parse(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+  Type type;
+
+  OpAsmParser::Argument inductionVariable;
+  OpAsmParser::UnresolvedOperand lb, ub, step;
+  // Parse the optional initial iteration arguments.
+  SmallVector<OpAsmParser::Argument, 4> regionArgs;
+
+  // Parse the induction variable followed by '='.
+  if (parser.parseOperand(inductionVariable.ssaName) || parser.parseEqual() ||
+      // Parse loop bounds.
+      parser.parseOperand(lb) || parser.parseKeyword("to") ||
+      parser.parseOperand(ub) || parser.parseKeyword("step") ||
+      parser.parseOperand(step) || parser.parseColon() ||
+      parser.parseType(type))
+    return failure();
+
+  regionArgs.push_back(inductionVariable);
+
+  // Resolve input operands.
+  regionArgs.front().type = type;
+  if (parser.resolveOperand(lb, type, result.operands) ||
+      parser.resolveOperand(ub, type, result.operands) ||
+      parser.resolveOperand(step, type, result.operands))
+    return failure();
+
+  // Parse the body region.
+  Region *body = result.addRegion();
+  if (parser.parseRegion(*body, regionArgs))
+    return failure();
+
+  // Parse the optional attribute list.
+  if (parser.parseOptionalAttrDict(result.attributes))
+    return failure();
+
+  if (auto name = result.attributes.getNamed("iterName")) {
+    if (auto attr = dyn_cast<StringAttr>(name->getValue()))
+      inductionVariable.ssaName.name = attr;
+  } else {
+    result.attributes.append(
+        {builder.getStringAttr("iterName"),
+         builder.getStringAttr(inductionVariable.ssaName.name)});
+  }
+
+  return success();
+}
+
+void ForOp::print(OpAsmPrinter &p) {
+  p << " " << getInductionVar() << " = " << getLowerBound() << " to "
+    << getUpperBound() << " step " << getStep();
+  p << " : " << getInductionVar().getType() << ' ';
+  p.printRegion(getRegion(),
+                /*printEntryBlockArgs=*/false,
+                /*printBlockTerminators=*/false);
+  p.printOptionalAttrDict((*this)->getAttrs(), {"iterName"});
+}
+
+//===----------------------------------------------------------------------===//
 // Assignment statements
 //===----------------------------------------------------------------------===//
 

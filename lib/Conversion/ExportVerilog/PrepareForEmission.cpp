@@ -373,8 +373,7 @@ static bool rewriteSideEffectingExpr(Operation *op) {
   // Check to see if this is already rewritten.
   if (op->hasOneUse()) {
     if (auto assign = dyn_cast<BPAssignOp>(*op->user_begin()))
-      if (isa_and_nonnull<RegOp, LogicOp>(assign.getDest().getDefiningOp()))
-        return false;
+      return false;
   }
 
   // Otherwise, we have to transform it.  Insert a reg at the top level, make

@@ -267,13 +267,32 @@ void FirRegLower::lower() {
               builder.create<sv::IfDefProceduralOp>(randInitRef, [&] {
                 // Create randomization vector
                 SmallVector<Value> randValues;
-                for (uint64_t x = 0; x < (maxBit + 31) / 32; ++x) {
-                  auto lhs = builder.create<sv::LogicOp>(
-                      loc, builder.getIntegerType(32),
-                      "_RANDOM_" + llvm::utostr(x));
-                  auto rhs = builder.create<sv::MacroRefExprSEOp>(
-                      loc, builder.getIntegerType(32), "RANDOM");
-                  builder.create<sv::BPAssignOp>(loc, lhs, rhs);
+                auto len = (maxBit + 31) / 32;
+                auto logic = builder.create<sv::LogicOp>(
+                    loc,
+                    hw::UnpackedArrayType::get(builder.getIntegerType(32), len),
+                    "_RANDOM");
+                auto iterType =
+                    builder.getIntegerType(llvm::Log2_64_Ceil(len + 1));
+                auto forLoop = builder.create<sv::ForOp>(
+                    loc, 0, len, 1, iterType, loc, "i",
+                    [&](BlockArgument iter) {
+                      auto rhs = builder.create<sv::MacroRefExprSEOp>(
+                          loc, builder.getIntegerType(32), "RANDOM");
+                      Value iterValue = iter;
+                      if (!iter.getType().isInteger(llvm::Log2_64_Ceil(len)))
+                        iterValue = builder.create<comb::ExtractOp>(
+                            loc, iterValue, 0, llvm::Log2_64_Ceil(len));
+                      auto lhs = builder.create<sv::ArrayIndexInOutOp>(
+                          loc, logic, iterValue);
+                      builder.create<sv::BPAssignOp>(loc, lhs, rhs);
+                    });
+                builder.setInsertionPointAfter(forLoop);
+                for (uint64_t x = 0; x < len; ++x) {
+                  auto lhs = builder.create<sv::ArrayIndexInOutOp>(
+                      loc, logic,
+                      getOrCreateConstant(loc,
+                                          APInt(llvm::Log2_64_Ceil(len), x)));
                   randValues.push_back(lhs.getResult());
                 }
 
@@ -282,6 +301,7 @@ void FirRegLower::lower() {
                   initialize(builder, svReg, randValues);
               });
             }
+
             if (!asyncResets.empty()) {
               // If the register is async reset, we need to insert extra
               // initialization in post-randomization so that we can set the
@@ -315,8 +335,8 @@ static bool areEquivalentValues(Value term, Value next) {
   if (term == next)
     return true;
   // Check whether these values are equivalent array accesses with constant
-  // index. We have to check the equivalence recursively because they might not
-  // be CSEd.
+  // index. We have to check the equivalence recursively because they might
+  // not be CSEd.
   if (auto t1 = term.getDefiningOp<hw::ArrayGetOp>())
     if (auto t2 = next.getDefiningOp<hw::ArrayGetOp>())
       if (auto c1 = t1.getIndex().getDefiningOp<hw::ConstantOp>())
@@ -515,14 +535,15 @@ FirRegLower::RegLowerInfo FirRegLower::lower(FirRegOp reg) {
 
   // For array registers, we annotate ram_style attributes if
   // `addVivadoRAMAddressConflictSynthesisBugWorkaround` is enabled so that we
-  // can workaround incorrect optimizations of vivado. See "RAM address conflict
-  // and Vivado synthesis bug" issue in the vivado forum for the more detail.
+  // can workaround incorrect optimizations of vivado. See "RAM address
+  // conflict and Vivado synthesis bug" issue in the vivado forum for the more
+  // detail.
   if (addVivadoRAMAddressConflictSynthesisBugWorkaround &&
       hw::type_isa<hw::ArrayType, hw::UnpackedArrayType>(reg.getType()))
     circt::sv::setSVAttributes(
-        svReg.reg,
-        sv::SVAttributeAttr::get(builder.getContext(), "ram_style",
-                                 R"("distributed")", /*emitAsComment=*/false));
+        svReg.reg, sv::SVAttributeAttr::get(builder.getContext(), "ram_style",
+                                            R"("distributed")",
+                                            /*emitAsComment=*/false));
 
   if (auto innerSymAttr = reg.getInnerSymAttr())
     svReg.reg.setInnerSymAttr(innerSymAttr);

@@ -812,9 +812,12 @@ StringRef getVerilogValueName(Value val) {
   if (auto *op = val.getDefiningOp())
     return getSymOpName(op);
 
-  if (auto port = val.dyn_cast<BlockArgument>())
+  if (auto port = val.dyn_cast<BlockArgument>()) {
+    if (auto forOp = dyn_cast<ForOp>(port.getParentBlock()->getParentOp()))
+      return forOp->getAttrOfType<StringAttr>("hw.verilogName");
     return getPortVerilogName(port.getParentBlock()->getParentOp(),
                               port.getArgNumber());
+  }
   assert(false && "unhandled value");
   return {};
 }
@@ -2988,6 +2991,8 @@ private:
   LogicalResult visitSV(GenerateOp op);
   LogicalResult visitSV(GenerateCaseOp op);
 
+  LogicalResult visitSV(ForOp op);
+
   void emitAssertionLabel(Operation *op, StringRef opName);
   void emitAssertionMessage(StringAttr message, ValueRange args,
                             SmallPtrSetImpl<Operation *> &ops,
@@ -3536,6 +3541,36 @@ LogicalResult StmtEmitter::visitSV(GenerateCaseOp op) {
 
   startStatement();
   ps << "endcase";
+  setPendingNewline();
+  return success();
+}
+
+LogicalResult StmtEmitter::visitSV(ForOp op) {
+  emitSVAttributes(op);
+  llvm::SmallPtrSet<Operation *, 8> ops;
+  startStatement();
+  auto iterName = getSymOpName(op);
+  ps << "for" << PP::space << "(" << "logic" << PP::space;
+  ps.invokeWithStringOS([&](auto &os) {
+    emitter.emitTypeDims(op.getInductionVar().getType(), op.getLoc(), os);
+    os << iterName << " = ";
+  });
+  emitExpression(op.getLowerBound(), ops);
+  ps << ";" << PPExtString(iterName) << PPExtString("<") << PP::space;
+  emitExpression(op.getUpperBound(), ops);
+  ps << ";" << PP::space;
+
+  if(auto constant = op.getStep().getDefiningOp<hw::ConstantOp>(); constant && constant.getValue() == 1){
+    ps << "++" << iterName;
+  }else{
+    ps << PPExtString(iterName) << "+=";
+    emitExpression(op.getStep(), ops);
+  }
+  ps <<") begin";
+  setPendingNewline();
+  emitStatementBlock(op.getBody().getBlocks().front());
+  startStatement();
+  ps << "end";
   setPendingNewline();
   return success();
 }

@@ -9,6 +9,7 @@ add_circt_dialect_library(CIRCTSV
 
   DEPENDS
   MLIRSVIncGen
+  MLIRLoopLikeInterfaceIncGen
 
   LINK_COMPONENTS
   Support

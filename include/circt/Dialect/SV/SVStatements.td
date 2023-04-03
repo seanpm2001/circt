@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 include "mlir/IR/EnumAttr.td"
+include "mlir/Interfaces/LoopLikeInterface.td"
 
 /// Ensure symbol is one of the hw module.* types
 def isModuleSymbol : AttrConstraint<
@@ -747,4 +748,34 @@ def ReadMemOp : SVOp<"readmem", [ProceduralOp]> {
   let results = (outs);
   let assemblyFormat =
     "$dest `,` $filename `,` $base attr-dict `:` qualified(type($dest))";
+}
+
+def ForOp : SVOp<"for", [SingleBlock, NoTerminator,
+                        ProceduralOp, ProceduralRegion, 
+                        OpAsmOpInterface,
+                        // DeclareOpInterfaceMethods<LoopLikeOpInterface, ["getSingleInductionVar", "getSingleLowerBound", "getSingleStep",
+                        //   "getSingleUpperBound"]>, 
+                        AllTypesMatch<["lowerBound", "upperBound", "step"]>]> {
+  let summary = "System verilog for loop";
+
+  let description = [{
+    This operation defines System Verilog for loop.
+  }];
+
+  let regions = (region SizedRegion<1>:$body);
+  let arguments = (ins HWIntegerType:$lowerBound,
+                       HWIntegerType:$upperBound,
+                       HWIntegerType:$step,
+                       DefaultValuedAttr<StrAttr, "{}">:$iterName);
+  let results = (outs);
+  let builders = [
+      OpBuilder<(ins "unsigned":$lowerBound, "unsigned":$upperBound,
+                     "unsigned":$step, "IntegerType":$iterArg, "Location": $loc, "StringRef":$iterName,
+                     CArg<"std::function<void(BlockArgument)>", "{}">:$thenCtor)>
+  ];
+  let hasCustomAssemblyFormat = 1;
+  let extraClassDeclaration = [{
+    Block* getBodyBlock() { return &getBody().front(); }
+    Value getInductionVar() { return getBodyBlock()->getArgument(0); }
+  }];
 }
