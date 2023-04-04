@@ -43,16 +43,37 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
   void eraseEmptyModule(FModuleOp module);
   void forwardConstantOutputPort(FModuleOp module);
 
+  void markAlive(InstanceOp instance) {
+    markAlive(instance->getBlock());
+    if (liveInstances.insert(instance).second)
+      for (auto inputPort : lazyLiveInputPorts[instance])
+        markAlive(inputPort);
+  }
+
+  void markAlive(Block *block) {
+    if (!liveBlocks.insert(block).second)
+      return;
+    if (auto fmodule = dyn_cast<hw::HWModuleLike>(block->getParentOp()))
+      for (auto instanceLike :
+           instanceGraph->lookup(fmodule.moduleNameAttr())->uses())
+        markAlive(cast<firrtl::InstanceOp>(instanceLike->getInstance()));
+  }
+
   void markAlive(Value value) {
+    markAlive(value.getParentBlock());
+    if (auto instanceOp = value.getDefiningOp<InstanceOp>()) {
+      markAlive(instanceOp);
+    }
+
     //  If the value is already in `liveSet`, skip it.
-    if (liveSet.insert(value).second)
+    if (liveValues.insert(value).second)
       worklist.push_back(value);
   }
 
   /// Return true if the value is known alive.
   bool isKnownAlive(Value value) const {
     assert(value && "null should not be used");
-    return liveSet.count(value);
+    return liveValues.count(value);
   }
 
   /// Return true if the value is assumed dead.
@@ -72,9 +93,10 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
   void visitConnect(FConnectLike connect);
   void visitSubelement(Operation *op);
   void markBlockExecutable(Block *block);
-  void markBlockUndeletable(Block *block) { undeletableBlocks.insert(block); }
+  void markBlockUndeletable(Block *block) { liveBlocks.insert(block); }
+
   bool isBlockUndeletable(Block *block) const {
-    return undeletableBlocks.contains(block);
+    return liveBlocks.contains(block);
   }
   void markDeclaration(Operation *op);
   void markInstanceOp(InstanceOp instanceOp);
@@ -93,12 +115,12 @@ private:
   /// A worklist of values whose liveness recently changed, indicating the
   /// users need to be reprocessed.
   SmallVector<Value, 64> worklist;
-  llvm::DenseSet<Value> liveSet;
-  llvm::DenseSet<InstanceOp> liveInstance;
+  llvm::DenseSet<Value> liveValues;
+  llvm::DenseSet<InstanceOp> liveInstances;
 
   /// The set of modules that cannot be removed for several reasons (side
   /// effects, ports/decls have don't touch).
-  DenseSet<Block *> undeletableBlocks;
+  DenseSet<Block *> liveBlocks;
 
   /// This keeps track of input ports that need to be kept if the associated
   /// instance is alive.
@@ -111,7 +133,6 @@ void IMDeadCodeElimPass::markDeclaration(Operation *op) {
   if (!isDeletableDeclaration(op)) {
     for (auto result : op->getResults())
       markAlive(result);
-    markBlockUndeletable(op->getBlock());
   }
 }
 
@@ -122,7 +143,8 @@ void IMDeadCodeElimPass::markUnknownSideEffectOp(Operation *op) {
     markAlive(result);
   for (auto operand : op->getOperands())
     markAlive(operand);
-  markBlockUndeletable(op->getBlock());
+
+  markAlive(op->getBlock());
 }
 
 void IMDeadCodeElimPass::visitUser(Operation *op) {
@@ -150,18 +172,15 @@ void IMDeadCodeElimPass::markInstanceOp(InstanceOp instance) {
       // Otherwise this is an inuput from it or an inout, mark it as alive.
       markAlive(portVal);
     }
-    markBlockUndeletable(instance->getBlock());
-    liveInstance.insert(instance);
+    markAlive(instance);
     return;
   }
 
   // Otherwise this is a defined module.
   auto fModule = cast<FModuleOp>(op);
   markBlockExecutable(fModule.getBodyBlock());
-  if (isBlockUndeletable(fModule.getBodyBlock()) || instance.getInnerSym()) {
-    markBlockUndeletable(instance->getBlock());
-    liveInstance.insert(instance);
-  }
+  if (instance.getInnerSym() || fModule.isPublic())
+    markAlive(instance);
 
   // Ok, it is a normal internal module reference so populate
   // resultPortToInstanceResultMapping.
@@ -181,14 +200,12 @@ void IMDeadCodeElimPass::markBlockExecutable(Block *block) {
     return; // Already executable.
 
   if (!cast<FModuleOp>(block->getParentOp()).getAnnotationsAttr().empty())
-    markBlockUndeletable(block);
+    markAlive(block);
 
   // Mark ports with don't touch as alive.
   for (auto blockArg : block->getArguments())
-    if (hasDontTouch(blockArg)) {
+    if (hasDontTouch(blockArg))
       markAlive(blockArg);
-      markBlockUndeletable(block);
-    }
 
   for (auto &op : *block) {
     if (isDeclaration(&op))
@@ -309,7 +326,7 @@ void IMDeadCodeElimPass::visitValue(Value value) {
       for (auto userOfResultPort :
            resultPortToInstanceResultMapping[blockArg]) {
         auto instance = userOfResultPort.getDefiningOp<InstanceOp>();
-        if (liveInstance.contains(instance))
+        if (liveInstances.contains(instance))
           markAlive(userOfResultPort);
         else
           lazyLiveInputPorts[instance].push_back(userOfResultPort);
@@ -333,9 +350,7 @@ void IMDeadCodeElimPass::visitValue(Value value) {
 
     // If the output port is alive, mark the instnace as alive. Propagate the
     // liveness of input ports accumulated so far.
-    if (liveInstance.insert(instance).second)
-      for (auto inputPort : lazyLiveInputPorts[instance])
-        markAlive(inputPort);
+    markAlive(instance);
 
     BlockArgument modulePortVal =
         module.getArgument(instanceResult.getResultNumber());
@@ -446,15 +461,15 @@ void IMDeadCodeElimPass::rewriteModuleSignature(FModuleOp module) {
         // is used as a temporary wire so make sure that a replaced wire is
         // putted into `liveSet`.
         if (isKnownAlive(result)) {
-          liveSet.erase(result);
-          liveSet.insert(wire);
+          liveValues.erase(result);
+          liveValues.insert(wire);
         }
       };
 
   // First, delete dead instances.
   for (auto *use : llvm::make_early_inc_range(instanceGraphNode->uses())) {
     auto instance = cast<InstanceOp>(*use->getInstance());
-    if (!liveInstance.count(instance)) {
+    if (!liveInstances.count(instance)) {
       // Replace old instance results with dummy wires.
       ImplicitLocOpBuilder builder(instance.getLoc(), instance);
       for (auto index : llvm::seq(0u, instance.getNumResults()))
@@ -505,8 +520,8 @@ void IMDeadCodeElimPass::rewriteModuleSignature(FModuleOp module) {
       WireOp wire = builder.create<WireOp>(argument.getType());
 
       // Since `liveSet` contains the port, we have to erase it from the set.
-      liveSet.erase(argument);
-      liveSet.insert(wire);
+      liveValues.erase(argument);
+      liveValues.insert(wire);
       argument.replaceAllUsesWith(wire);
       deadPortIndexes.set(index);
       continue;
@@ -527,14 +542,14 @@ void IMDeadCodeElimPass::rewriteModuleSignature(FModuleOp module) {
   // Erase arguments of the old module from liveSet to prevent from creating
   // dangling pointers.
   for (auto arg : module.getArguments())
-    liveSet.erase(arg);
+    liveValues.erase(arg);
 
   // Delete ports from the module.
   module.erasePorts(deadPortIndexes);
 
   // Add arguments of the new module to liveSet.
   for (auto arg : module.getArguments())
-    liveSet.insert(arg);
+    liveValues.insert(arg);
 
   // Rewrite all uses.
   for (auto *use : llvm::make_early_inc_range(instanceGraphNode->uses())) {
@@ -547,19 +562,19 @@ void IMDeadCodeElimPass::rewriteModuleSignature(FModuleOp module) {
     // Since we will rewrite instance op, it is necessary to remove old
     // instance results from liveSet.
     for (auto oldResult : instance.getResults())
-      liveSet.erase(oldResult);
+      liveValues.erase(oldResult);
 
     // Create a new instance op without dead ports.
     auto newInstance = instance.erasePorts(builder, deadPortIndexes);
 
     // Mark new results as alive.
     for (auto newResult : newInstance.getResults())
-      liveSet.insert(newResult);
+      liveValues.insert(newResult);
 
     instanceGraph->replaceInstance(instance, newInstance);
-    if (liveInstance.contains(instance)) {
-      liveInstance.erase(instance);
-      liveInstance.insert(newInstance);
+    if (liveInstances.contains(instance)) {
+      liveInstances.erase(instance);
+      liveInstances.insert(newInstance);
     }
     // Remove old one.
     instance.erase();
