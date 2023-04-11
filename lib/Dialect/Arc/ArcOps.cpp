@@ -237,26 +237,6 @@ LogicalResult ClockDomainOp::verifyRegions() {
 }
 
 //===----------------------------------------------------------------------===//
-// RootInputOp
-//===----------------------------------------------------------------------===//
-
-void RootInputOp::getAsmResultNames(OpAsmSetValueNameFn setNameFn) {
-  SmallString<32> buf("in_");
-  buf += getName();
-  setNameFn(getState(), buf);
-}
-
-//===----------------------------------------------------------------------===//
-// RootOutputOp
-//===----------------------------------------------------------------------===//
-
-void RootOutputOp::getAsmResultNames(OpAsmSetValueNameFn setNameFn) {
-  SmallString<32> buf("out_");
-  buf += getName();
-  setNameFn(getState(), buf);
-}
-
-//===----------------------------------------------------------------------===//
 // ModelOp
 //===----------------------------------------------------------------------===//
 

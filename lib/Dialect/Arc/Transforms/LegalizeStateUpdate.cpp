@@ -159,7 +159,7 @@ void AccessAnalysis::visitBlock(Block *block) {
   SmallPtrSet<Value, 4> localState;
   AccessState innerAccesses(block);
   for (Operation &op : *block) {
-    if (isa<AllocStateOp>(&op)) {
+    if (isa<AllocOp>(&op) && isa<StateType>(op.getResultTypes().front())) {
       localState.insert(op.getResult(0));
       recordState(op.getResult(0));
     }
@@ -339,23 +339,21 @@ LogicalResult Legalizer::visitBlock(Block *block) {
       // HACK: This is ugly, but we need a storage reference to allocate a state
       // into. Ideally we'd materialize this later on, but the current impl of
       // the alloc op requires a storage immediately. So try to find one.
-      auto storage = TypeSwitch<Operation *, Value>(state.getDefiningOp())
-                         .Case<AllocStateOp, RootInputOp, RootOutputOp>(
-                             [&](auto allocOp) { return allocOp.getStorage(); })
-                         .Default([](auto) { return Value{}; });
-      if (!storage) {
+      auto allocOp = state.getDefiningOp<AllocOp>();
+      if (!allocOp) {
         mlir::emitError(
             state.getLoc(),
             "cannot find storage pointer to allocate temporary into");
         return failure();
       }
 
+      auto storage = allocOp.getStorage();
+
       // Allocate a temporary state, read the current value of the state we are
       // legalizing, and write it to the temporary.
       ++numLegalizedWrites;
       ImplicitLocOpBuilder builder(state.getLoc(), op);
-      auto tmpState =
-          builder.create<AllocStateOp>(state.getType(), storage, nullptr);
+      auto tmpState = builder.create<AllocOp>(state.getType(), storage);
       auto stateValue = builder.create<StateReadOp>(state);
       builder.create<StateWriteOp>(tmpState, stateValue, Value{});
       locallyLegalizedStates.push_back(state);

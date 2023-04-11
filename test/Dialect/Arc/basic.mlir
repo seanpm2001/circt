@@ -148,3 +148,28 @@ hw.module @memoryOps(%clk: i1, %en: i1) {
   // CHECK-NEXT: arc.memory_write [[MEM]][%c0_i32], %c0_i32 : <4 x i32>, i32
   arc.memory_write %mem[%c0_i32], %c0_i32 : <4 x i32>, i32
 }
+
+// CHECK-LABEL: hw.module @tapOps
+hw.module @tapOps(%arg0: i4, %arg1: !arc.state<i4>, %arg2: !arc.memory<4 x i1, 8>, %arg3: !arc.storage<4>, %arg4: !hw.array<4xi1>) {
+  // CHECK-NEXT: %{{.+}} = arc.tap %arg0 : i4 input w "a" : i4
+  %0 = arc.tap %arg0 : i4 input w "a" : i4
+  // CHECK-NEXT: %{{.+}} = arc.tap %arg0 : i4 output r "b" : i4
+  %1 = arc.tap %arg0 : i4 output r "b" : i4
+  // CHECK-NEXT: %{{.+}} = arc.tap %arg0 : i4 wire r "c" : i4
+  %2 = arc.tap %arg0 : i4 wire r "c" : i4
+  // CHECK-NEXT: %{{.+}} = arc.tap %arg0 : i4 register rw "d" : i4
+  %3 = arc.tap %arg0 : i4 register rw "d" : i4
+  // CHECK-NEXT: %{{.+}} = arc.tap %arg4 : !hw.array<4xi1> memory rw "e" : !hw.array<4xi1>
+  %4 = arc.tap %arg4 : !hw.array<4xi1> memory rw "e" : !hw.array<4xi1>
+
+  // CHECK-NEXT: arc.state_tap %arg1 input rw "f" : !arc.state<i4>
+  arc.state_tap %arg1 input rw "f" : !arc.state<i4>
+  // CHECK-NEXT: arc.state_tap %arg3 output w "g" : !arc.storage<4>
+  arc.state_tap %arg3 output w "g" : !arc.storage<4>
+  // CHECK-NEXT: arc.state_tap %arg1 wire rw "h" : !arc.state<i4>
+  arc.state_tap %arg1 wire rw "h" : !arc.state<i4>
+  // CHECK-NEXT: arc.state_tap %arg1 register r "i" : !arc.state<i4>
+  arc.state_tap %arg1 register r "i" : !arc.state<i4>
+  // CHECK-NEXT: arc.state_tap %arg2 memory w "j" : !arc.memory<4 x i1, 8>
+  arc.state_tap %arg2 memory w "j" : !arc.memory<4 x i1, 8>
+}

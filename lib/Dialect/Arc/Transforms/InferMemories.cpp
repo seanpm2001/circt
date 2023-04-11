@@ -80,7 +80,8 @@ void InferMemoriesPass::runOnOperation() {
     auto memType = MemoryType::get(&getContext(), depth, wordType, {});
     auto memOp = builder.create<MemoryOp>(memType);
     if (!instOp.getInstanceName().empty())
-      memOp->setAttr("name", instOp.getInstanceNameAttr());
+      builder.create<StateTapOp>(memOp.getMemory(), TapKind::Memory,
+                                 TapMode::ReadWrite, instOp.getInstanceName());
 
     unsigned argIdx = 0;
     unsigned resultIdx = 0;

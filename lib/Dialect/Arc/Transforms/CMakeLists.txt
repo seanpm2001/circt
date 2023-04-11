@@ -11,9 +11,9 @@ add_circt_dialect_library(CIRCTArcTransforms
   LowerClocksToFuncs.cpp
   LowerLUT.cpp
   LowerState.cpp
+  LowerTaps.cpp
   MakeTables.cpp
   MuxToControlFlow.cpp
-  PrintStateInfo.cpp
   RemoveUnusedArcArguments.cpp
   SimplifyVariadicOps.cpp
   SinkInputs.cpp
@@ -30,8 +30,10 @@ add_circt_dialect_library(CIRCTArcTransforms
   CIRCTHW
   CIRCTSV
   CIRCTSeq
+  CIRCTSystemC
   CIRCTSupport
   MLIRFuncDialect
+  MLIREmitCDialect
   MLIRIR
   MLIRPass
   MLIRTransformUtils
