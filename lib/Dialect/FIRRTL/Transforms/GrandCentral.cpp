@@ -1341,7 +1341,7 @@ bool GrandCentralPass::traverseField(
             Twine(idNum + 1).toVector(replStr);
             replStr.append("}}");
           }
-          return StringAttr::get(&getContext(), "assign " + replStr + ";");
+          return StringAttr::get(&getContext(), "force  " + replStr + ";");
         };
 
         // This is the new style of XMRs using RefTypes.  The value subsitution
