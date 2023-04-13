@@ -4456,7 +4456,9 @@ FIRRTLType RefSubOp::inferReturnType(ValueRange operands,
   // Allow for now, as need to LowerTypes things generally.
   if (auto vectorType = inType.dyn_cast<FVectorType>()) {
     if (fieldIdx < vectorType.getNumElements())
-      return RefType::get(vectorType.getElementType(), refType.getForceable());
+      return RefType::get(
+          vectorType.getElementType().getConstType(vectorType.isConst()),
+          refType.getForceable());
     return emitInferRetTypeError(loc, "out of range index '", fieldIdx,
                                  "' in RefType of vector type ", refType);
   }
@@ -4466,8 +4468,9 @@ FIRRTLType RefSubOp::inferReturnType(ValueRange operands,
                                    "subfield element index is greater than "
                                    "the number of fields in the bundle type");
     }
-    return RefType::get(bundleType.getElement(fieldIdx).type,
-                        refType.getForceable());
+    return RefType::get(
+        bundleType.getElement(fieldIdx).type.getConstType(bundleType.isConst()),
+        refType.getForceable());
   }
 
   return emitInferRetTypeError(
