@@ -1234,7 +1234,7 @@ OpFoldResult MuxPrimOp::constFold(FoldAdaptor adaptor) {
         return getIntAttr(getType(), *highCst);
       // mux(cond, 1, 0) -> cond
       if (highCst->isOne() && lowCst->isZero() &&
-          mixedConstTypes(getType(), getSel().getType()))
+          mixedConstTypes(getType(), getSel().getType().cast<FIRRTLBaseType>()))
         return getSel();
 
       // TODO: x ? ~0 : 0 -> sext(x)
@@ -2049,7 +2049,7 @@ OpFoldResult UninferredResetCastOp::constFold(FoldAdaptor adaptor) {
   return {};
 }
 
-OpFoldResult UninferredWidthCastOp::fold(FoldAdaptor adaptor) {
+OpFoldResult UninferredWidthCastOp::constFold(FoldAdaptor adaptor) {
   if (getOperand().getType() == getType() && !getType().hasUninferredWidth())
     return getOperand();
   return {};
@@ -3062,7 +3062,7 @@ LogicalResult InvalidValueOp::canonicalize(InvalidValueOp op,
 // ClockGateIntrinsicOp
 //===----------------------------------------------------------------------===//
 
-OpFoldResult ClockGateIntrinsicOp::fold(FoldAdaptor adaptor) {
+OpFoldResult ClockGateIntrinsicOp::constFold(FoldAdaptor adaptor) {
   // Forward the clock if one of the enables is always true.
   if (isConstantOne(adaptor.getEnable()) ||
       isConstantOne(adaptor.getTestEnable()))
