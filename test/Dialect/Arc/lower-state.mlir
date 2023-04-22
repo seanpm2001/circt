@@ -274,3 +274,27 @@ arc.define @CombLoopRegressionArc1(%arg0: i1, %arg1: i1) -> i1 {
 arc.define @CombLoopRegressionArc2(%arg0: i1) -> (i1, i1) {
   arc.output %arg0, %arg0 : i1, i1
 }
+
+// CHECK-LABEL: arc.model "BlackBox"
+hw.module @BlackBox(%clk: i1) {
+  %0 = arc.state @DummyArc(%2) clock %clk lat 1 : (i42) -> i42
+  %1 = comb.and %0, %0 : i42
+  %ext.out = hw.instance "ext" @BlackBoxExt(in: %1: i42) -> (out: i42)
+  %2 = comb.or %ext.out, %ext.out : i42
+  // CHECK-DAG: [[EXT_IN:%.+]] = arc.alloc_state %arg0 {name = "ext/in"}
+  // CHECK-DAG: [[EXT_OUT:%.+]] = arc.alloc_state %arg0 {name = "ext/out"}
+  // CHECK-DAG: [[STATE:%.+]] = arc.alloc_state %arg0 :
+
+  // Clock Tree
+  // CHECK-DAG: [[TMP1:%.+]] = arc.state_read [[EXT_OUT]]
+  // CHECK-DAG: [[TMP2:%.+]] = comb.or [[TMP1]], [[TMP1]]
+  // CHECK-DAG: [[TMP3:%.+]] = arc.state @DummyArc([[TMP2]])
+  // CHECK-DAG: arc.state_write [[STATE]] = [[TMP3]]
+
+  // Passthrough
+  // CHECK-DAG: [[TMP1:%.+]] = arc.state_read [[STATE]]
+  // CHECK-DAG: [[TMP2:%.+]] = comb.and [[TMP1]], [[TMP1]]
+  // CHECK-DAG: arc.state_write [[EXT_IN]] = [[TMP2]]
+}
+// CHECK-NOT: hw.module.extern private @BlackBoxExt
+hw.module.extern private @BlackBoxExt(%in: i42) -> (out: i42)

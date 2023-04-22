@@ -103,6 +103,8 @@ struct ModuleLowering {
   LogicalResult lowerState(MemoryReadPortOp memReadOp);
   LogicalResult lowerState(MemoryWritePortOp memWriteOp);
   LogicalResult lowerState(TapOp tapOp);
+  LogicalResult lowerExtModules(SymbolTable &symtbl);
+  LogicalResult lowerExtModule(InstanceOp instOp);
 
   LogicalResult cleanup();
 
@@ -125,7 +127,7 @@ static bool shouldMaterialize(Operation *op) {
 
   if (isa<MemoryOp, AllocStateOp, AllocMemoryOp, AllocStorageOp, ClockTreeOp,
           PassThroughOp, RootInputOp, RootOutputOp, StateWriteOp,
-          MemoryWritePortOp>(op))
+          MemoryWritePortOp, HWInstanceLike>(op))
     return false;
 
   return true;
@@ -560,6 +562,69 @@ LogicalResult ModuleLowering::lowerState(TapOp tapOp) {
   return success();
 }
 
+/// Lower all instances of external modules to internal inputs/outputs to be
+/// driven from outside of the design.
+LogicalResult ModuleLowering::lowerExtModules(SymbolTable &symtbl) {
+  for (auto op : llvm::make_early_inc_range(moduleOp.getOps<InstanceOp>()))
+    if (isa<HWModuleExternOp>(symtbl.lookup(op.getModuleNameAttr().getAttr())))
+      if (failed(lowerExtModule(op)))
+        return failure();
+  return success();
+}
+
+LogicalResult ModuleLowering::lowerExtModule(InstanceOp instOp) {
+  LLVM_DEBUG(llvm::dbgs() << "- Lowering extmodule "
+                          << instOp.getInstanceNameAttr() << "\n");
+
+  SmallString<32> baseName(instOp.getInstanceName());
+  auto baseNameLen = baseName.size();
+
+  // Lower the inputs of the extmodule as state that is only written.
+  for (auto [operand, name] :
+       llvm::zip(instOp.getOperands(), instOp.getArgNames())) {
+    LLVM_DEBUG(llvm::dbgs()
+               << "  - Input " << name << " : " << operand.getType() << "\n");
+    auto intType = operand.getType().dyn_cast<IntegerType>();
+    if (!intType)
+      return mlir::emitError(operand.getLoc(), "input ")
+             << name << " of extern module " << instOp.getModuleNameAttr()
+             << " instance " << instOp.getInstanceNameAttr()
+             << " is of non-integer type " << operand.getType();
+    baseName.resize(baseNameLen);
+    baseName += '/';
+    baseName += cast<StringAttr>(name).getValue();
+    auto &passThrough = getOrCreatePassThrough();
+    auto state = builder.create<AllocStateOp>(
+        instOp.getLoc(), StateType::get(intType), storageArg);
+    state->setAttr("name", builder.getStringAttr(baseName));
+    passThrough.builder.create<StateWriteOp>(
+        instOp.getLoc(), state, passThrough.materializeValue(operand), Value{});
+  }
+
+  // Lower the outputs of the extmodule as state that is only read.
+  for (auto [result, name] :
+       llvm::zip(instOp.getResults(), instOp.getResultNames())) {
+    LLVM_DEBUG(llvm::dbgs()
+               << "  - Output " << name << " : " << result.getType() << "\n");
+    auto intType = result.getType().dyn_cast<IntegerType>();
+    if (!intType)
+      return mlir::emitError(result.getLoc(), "output ")
+             << name << " of extern module " << instOp.getModuleNameAttr()
+             << " instance " << instOp.getInstanceNameAttr()
+             << " is of non-integer type " << result.getType();
+    baseName.resize(baseNameLen);
+    baseName += '/';
+    baseName += cast<StringAttr>(name).getValue();
+    auto state = builder.create<AllocStateOp>(
+        result.getLoc(), StateType::get(intType), storageArg);
+    state->setAttr("name", builder.getStringAttr(baseName));
+    replaceValueWithStateRead(result, state);
+  }
+
+  instOp.erase();
+  return success();
+}
+
 LogicalResult ModuleLowering::cleanup() {
   // Establish an order among all operations (to avoid an O(n²) pathological
   // pattern with `moveBefore`) and replicate read operations into the blocks
@@ -625,25 +690,36 @@ struct LowerStatePass : public LowerStateBase<LowerStatePass> {
   LowerStatePass(const LowerStatePass &pass) : LowerStatePass() {}
 
   void runOnOperation() override;
-  LogicalResult runOnModule(HWModuleOp moduleOp);
+  LogicalResult runOnModule(HWModuleOp moduleOp, SymbolTable &symtbl);
 
   Statistics stats{this};
 };
 } // namespace
 
 void LowerStatePass::runOnOperation() {
-  for (auto op :
-       llvm::make_early_inc_range(getOperation().getOps<HWModuleOp>()))
-    if (failed(runOnModule(op)))
-      return signalPassFailure();
+  auto &symtbl = getAnalysis<SymbolTable>();
+  SmallVector<HWModuleExternOp> extModules;
+  for (auto &op : llvm::make_early_inc_range(getOperation().getOps())) {
+    if (auto moduleOp = dyn_cast<HWModuleOp>(&op)) {
+      if (failed(runOnModule(moduleOp, symtbl)))
+        return signalPassFailure();
+    } else if (auto extModuleOp = dyn_cast<HWModuleExternOp>(&op)) {
+      extModules.push_back(extModuleOp);
+    }
+  }
+  for (auto op : extModules)
+    op.erase();
 }
 
-LogicalResult LowerStatePass::runOnModule(HWModuleOp moduleOp) {
+LogicalResult LowerStatePass::runOnModule(HWModuleOp moduleOp,
+                                          SymbolTable &symtbl) {
   LLVM_DEBUG(llvm::dbgs() << "Lowering state in `" << moduleOp.getModuleName()
                           << "`\n");
   ModuleLowering lowering(moduleOp, stats);
   lowering.addStorageArg();
   if (failed(lowering.lowerStates()))
+    return failure();
+  if (failed(lowering.lowerExtModules(symtbl)))
     return failure();
 
   // Since we don't yet support derived clocks, simply delete all clock trees
