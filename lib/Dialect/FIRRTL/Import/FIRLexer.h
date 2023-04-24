@@ -16,6 +16,7 @@
 #include "circt/Support/LLVM.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "llvm/Support/SourceMgr.h"
+#include "mlir/IR/BuiltinAttributes.h"
 
 namespace mlir {
 class MLIRContext;

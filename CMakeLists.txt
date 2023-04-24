@@ -198,6 +198,10 @@ endif()
 set(CIRCT_RELEASE_TAG "circtorg" CACHE STRING
     "Prefix of the release tag (e.g. circtorg, firtool, and pycde).")
 
+if(LLVM_INCLUDE_EXAMPLES)
+  add_subdirectory(examples)
+endif()
+
 #-------------------------------------------------------------------------------
 # Verilator Configuration
 #-------------------------------------------------------------------------------

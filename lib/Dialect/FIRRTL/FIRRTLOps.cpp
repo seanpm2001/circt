@@ -319,6 +319,7 @@ static void printCircuitOpAttrs(OpAsmPrinter &p, Operation *op,
 }
 
 LogicalResult CircuitOp::verifyRegions() {
+  fprintf(stderr, "!!!!!!!!!!!!!!!!\n");
   StringRef main = getName();
 
   // Check that the circuit has a non-empty name.
