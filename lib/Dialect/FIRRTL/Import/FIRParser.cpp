@@ -133,7 +133,7 @@ static T &operator<<(T &os, const FIRVersion &version) {
 }
 
 /// The minimum FIRRTL Version supported by this compiler.
-FIRVersion minimumFIRVersion{0, 2, 0};
+FIRVersion minimumFIRVersion{2, 0, 0};
 
 /// This class implements logic common to all levels of the parser, including
 /// things like types and helper logic.

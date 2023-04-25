@@ -45,12 +45,12 @@ circuit test :
 ;// -----
 
 ; expected-error @below {{'circuit' must be first token on its line}}
-FIRRTL version 1.1.0 circuit test :
+FIRRTL version 2.0.0 circuit test :
   module test :
 
 ;// -----
 
-; expected-error @below {{FIRRTL version must be >=0.2.0}}
+; expected-error @below {{FIRRTL version must be >=2.0.0}}
 FIRRTL version 0.1.0
 circuit test :
   module test :
