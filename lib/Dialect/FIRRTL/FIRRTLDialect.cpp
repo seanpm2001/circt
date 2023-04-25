@@ -15,6 +15,7 @@
 #include "circt/Dialect/FIRRTL/FIRRTLOps.h"
 #include "circt/Support/FieldRef.h"
 #include "mlir/IR/DialectImplementation.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/SmallString.h"
@@ -127,11 +128,57 @@ struct ReinferResultTypes
     return success();
   }
 };
+
+// This pattern is a workaround for the fact that a 'const' type cannot be
+// folded to replace a non-'const' result type
+struct FoldConst
+    : public mlir::OpInterfaceRewritePattern<mlir::InferTypeOpInterface> {
+  FoldConst(MLIRContext *context)
+      : OpInterfaceRewritePattern<mlir::InferTypeOpInterface>(context) {}
+
+  LogicalResult matchAndRewrite(mlir::InferTypeOpInterface op,
+                                PatternRewriter &rewriter) const override {
+    SmallVector<Attribute> operandConstants;
+
+    // Check to see if any operands to the operation is constant and whether
+    // the operation knows how to constant fold itself
+    operandConstants.assign(op->getNumOperands(), Attribute());
+    for (size_t i = 0, e = op->getNumOperands(); i != e; ++i)
+      matchPattern(op->getOperand(i), m_Constant(&operandConstants[i]));
+
+    // Attempt to constant fold the operation
+    SmallVector<OpFoldResult> foldResults;
+    if (failed(op->fold(operandConstants, foldResults)))
+      return failure();
+
+    for (size_t i = 0, e = foldResults.size(); i != e; ++i) {
+      auto originalResult = op->getResults()[i];
+      Value replacementValue;
+      if (auto value = foldResults[i].dyn_cast<Value>()) {
+        replacementValue = value;
+      } else if (auto constant = foldResults[i].dyn_cast<Attribute>()) {
+        auto type = op->getResultTypes()[i];
+        if (auto baseType = type.dyn_cast<FIRRTLBaseType>())
+          type = baseType.getConstType(true);
+        auto *constantOp = op->getDialect()->materializeConstant(
+            rewriter, constant, type, op.getLoc());
+        replacementValue = constantOp->getResults()[0];
+      } else {
+        return failure();
+      }
+
+      originalResult.replaceAllUsesWith(replacementValue);
+      rewriter.eraseOp(op);
+    }
+
+    return success();
+  }
+};
 } // namespace
 
 void FIRRTLDialect::getCanonicalizationPatterns(
     RewritePatternSet &results) const {
-  results.add<ReinferResultTypes>(getContext());
+  results.add<ReinferResultTypes, FoldConst>(getContext());
 }
 
 // Provide implementations for the enums we use.

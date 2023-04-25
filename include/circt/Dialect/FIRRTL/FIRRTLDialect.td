@@ -88,19 +88,19 @@ class FIRRTLOp<string mnemonic, list<Trait> traits = []> :
     [{    
       OpFoldResult $cppClass::fold(FoldAdaptor adaptor) {
         auto result = this->constFold(adaptor);
-        if (result) {
-          if (auto value = result.dyn_cast<Value>()) {
-            assert(mixedConstTypes((*this)->getResultTypes()[0].cast<FIRRTLBaseType>(),
-                                   value.getType().cast<FIRRTLBaseType>()) 
-                  && "result type can only differ by constness");
-            (*this)->getResult(0).setType(value.getType());
-          } else {
-            // TODO: Uncomment once constant ops return const types
-            // if (auto resultType =
-            // (*this)->getResultTypes()[0].dyn_cast<FIRRTLBaseType>())
-            //   (*this)->getResult(0).setType(resultType.getConstType(true));
-          }
-        }
+        // if (result) {
+        //   if (auto value = result.dyn_cast<Value>()) {
+        //     assert(mixedConstTypes((*this)->getResultTypes()[0].cast<FIRRTLBaseType>(),
+        //                            value.getType().cast<FIRRTLBaseType>()) 
+        //           && "result type can only differ by constness");
+        //     (*this)->getResult(0).setType(value.getType());
+        //   } else {
+        //     // TODO: Uncomment once constant ops return const types
+        //     // if (auto resultType =
+        //     // (*this)->getResultTypes()[0].dyn_cast<FIRRTLBaseType>())
+        //     //   (*this)->getResult(0).setType(resultType.getConstType(true));
+        //   }
+        // }
         return result;
       }
     }],
@@ -110,20 +110,20 @@ class FIRRTLOp<string mnemonic, list<Trait> traits = []> :
         if (failed(this->constFold(adaptor, results)))
           return failure();
 
-        for (size_t i = 0, e = results.size(); i != e; ++i) {
-          if (auto value = results[i].dyn_cast<Value>()) {
-            assert(mixedConstTypes((*this)->getResultTypes()[i].cast<FIRRTLBaseType>(),
-                                   value.getType().cast<FIRRTLBaseType>()) 
-                  && "result type can only differ by constness");
-            (*this)->getResult(i).setType(value.getType());
-          } else if (results[i]) {
-            // TODO: Uncomment once constant ops return const types
-            // if (auto resultType =
-            // (*this)->getResultTypes()[i].dyn_cast<FIRRTLBaseType>();
-            //     resultType && result)
-            //   (*this)->getResult(i).setType(resultType.getConstType(true));
-          }
-        }
+        // for (size_t i = 0, e = results.size(); i != e; ++i) {
+        //   if (auto value = results[i].dyn_cast<Value>()) {
+        //     assert(mixedConstTypes((*this)->getResultTypes()[i].cast<FIRRTLBaseType>(),
+        //                            value.getType().cast<FIRRTLBaseType>()) 
+        //           && "result type can only differ by constness");
+        //     (*this)->getResult(i).setType(value.getType());
+        //   } else if (results[i]) {
+        //     // TODO: Uncomment once constant ops return const types
+        //     // if (auto resultType =
+        //     // (*this)->getResultTypes()[i].dyn_cast<FIRRTLBaseType>();
+        //     //     resultType && result)
+        //     //   (*this)->getResult(i).setType(resultType.getConstType(true));
+        //   }
+        // }
         return success();
       }
     }]
