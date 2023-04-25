@@ -19,6 +19,18 @@ include "FIRRTLOpInterfaces.td"
 include "FIRRTLTypes.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
+class StrictlyConnectable<
+  string destArg, 
+  string srcArg, 
+  string baseTypeTransform = "$_self.getType().cast<FIRRTLBaseType>()"
+> : PredOpTrait<"operands are strictly connectable", 
+  CPred<
+    "$" # destArg # ".getType() == $" # srcArg # ".getType() || " #
+    "firrtl::areTypesStrictlyEquivalent(" #
+    !subst("$_self", "$" # destArg, baseTypeTransform) # ", " #
+    !subst("$_self", "$" # srcArg, baseTypeTransform) #  ")"
+  >> {}
+
 def AttachOp : FIRRTLOp<"attach"> {
   let summary = "Analog Attach Statement";
 
@@ -50,7 +62,7 @@ def ConnectOp : FIRRTLOp<"connect", [FConnectLike]> {
   let hasCanonicalizer = true;
 }
 
-def StrictConnectOp : FIRRTLOp<"strictconnect", [SameTypeOperands, FConnectLike]> {
+def StrictConnectOp : FIRRTLOp<"strictconnect", [StrictlyConnectable<"dest", "src">, FConnectLike]> {
   let summary = "Connect two signals";
   let description =  [{
     Connect two values with strict constraints:
@@ -67,10 +79,10 @@ def StrictConnectOp : FIRRTLOp<"strictconnect", [SameTypeOperands, FConnectLike]
   let hasVerifier = 1;
 
   let assemblyFormat =
-    "$dest `,` $src  attr-dict `:` qualified(type($dest))";
+    "$dest `,` $src  attr-dict `:` custom<ConstDecay>(type($dest), type($src))";
 }
 
-def RefDefineOp : FIRRTLOp<"ref.define", [SameTypeOperands, FConnectLike]> {
+def RefDefineOp : FIRRTLOp<"ref.define", [StrictlyConnectable<"dest", "src", "$_self.getType().cast<RefType>().getType()">, FConnectLike]> {
   let summary = "FIRRTL Define References";
   let description = [{
     Define a target reference to the source reference:
@@ -91,7 +103,7 @@ def RefDefineOp : FIRRTLOp<"ref.define", [SameTypeOperands, FConnectLike]> {
   let hasVerifier = 1;
 
   let assemblyFormat =
-    "$dest `,` $src  attr-dict `:` qualified(type($dest))";
+    "$dest `,` $src attr-dict `:` custom<ConstDecay>(type($dest), type($src))";
 
   let extraClassDeclaration = [{
     static ConnectBehaviorKind getConnectBehaviorKind() {

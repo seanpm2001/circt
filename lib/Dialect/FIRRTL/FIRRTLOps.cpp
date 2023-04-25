@@ -2400,6 +2400,26 @@ LogicalResult RefDefineOp::verify() {
   return success();
 }
 
+static ParseResult parseConstDecay(OpAsmParser &parser, Type &destType,
+                                   Type &srcType) {
+  if (parser.parseType(destType))
+    return failure();
+  if (succeeded(parser.parseOptionalComma())) {
+    if (parser.parseType(srcType))
+      return failure();
+  } else {
+    srcType = destType;
+  }
+  return success();
+}
+
+static void printConstDecay(OpAsmPrinter &p, Operation *op, Type destType,
+                            Type srcType) {
+  p << destType;
+  if (srcType != destType)
+    p << ", " << srcType;
+}
+
 void WhenOp::createElseRegion() {
   assert(!hasElseRegion() && "already has an else region");
   getElseRegion().push_back(new Block());

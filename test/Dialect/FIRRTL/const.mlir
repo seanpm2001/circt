@@ -128,4 +128,36 @@ firrtl.module @MixedConstSubtag(in %in : !firrtl.enum<a: uint<1>, b: const.uint<
   firrtl.connect %b, %1 : !firrtl.const.uint<2>, !firrtl.const.uint<2>
 }
 
+// Test parsing/printing of strictconnect when both operands are const
+// CHECK-LABEL: firrtl.module @ConstStrictconnect
+firrtl.module @ConstStrictconnect(in %in : !firrtl.const.uint<3>, out %out : !firrtl.const.uint<3>) {
+  // CHECK-NEXT: firrtl.strictconnect %out, %in : !firrtl.const.uint<3>
+  firrtl.strictconnect %out, %in : !firrtl.const.uint<3>
+}
+
+// Test parsing/printing of strictconnect when constness of operands is mixed
+// CHECK-LABEL: firrtl.module @MixedConstStrictconnect
+firrtl.module @MixedConstStrictconnect(in %in : !firrtl.const.bundle<a: uint<1>, b: sint<2>>, out %out : !firrtl.bundle<a: uint<1>, b: sint<2>>) {
+  // CHECK-NEXT: firrtl.strictconnect %out, %in : !firrtl.bundle<a: uint<1>, b: sint<2>>, !firrtl.const.bundle<a: uint<1>, b: sint<2>>
+  firrtl.strictconnect %out, %in : !firrtl.bundle<a: uint<1>, b: sint<2>>, !firrtl.const.bundle<a: uint<1>, b: sint<2>>
+}
+
+// Test parsing/printing of ref.define when both operands are const
+// CHECK-LABEL: firrtl.module @ConstRefDefine
+firrtl.module @ConstRefDefine(in %a: !firrtl.const.uint<1>, out %_a: !firrtl.probe<const.uint<1>>) {
+  // CHECK-NEXT: [[VAL:%.+]] = firrtl.ref.send %a : !firrtl.const.uint<1>
+  // CHECK-NEXT: firrtl.ref.define %_a, [[VAL]] : !firrtl.probe<const.uint<1>>
+  %0 = firrtl.ref.send %a : !firrtl.const.uint<1>
+  firrtl.ref.define %_a, %0 : !firrtl.probe<const.uint<1>>
+}
+
+// Test parsing/printing of ref.define when constness of operands is mixed
+// CHECK-LABEL: firrtl.module @MixedConstRefDefine
+firrtl.module @MixedConstRefDefine(in %a: !firrtl.const.uint<1>, out %_a: !firrtl.probe<uint<1>>) {
+  // CHECK-NEXT: [[VAL:%.+]] = firrtl.ref.send %a : !firrtl.const.uint<1>
+  // CHECK-NEXT: firrtl.ref.define %_a, [[VAL]] : !firrtl.probe<uint<1>>, !firrtl.probe<const.uint<1>>
+  %0 = firrtl.ref.send %a : !firrtl.const.uint<1>
+  firrtl.ref.define %_a, %0 : !firrtl.probe<uint<1>>, !firrtl.probe<const.uint<1>>
+}
+
 }

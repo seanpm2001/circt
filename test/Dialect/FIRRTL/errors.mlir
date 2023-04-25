@@ -1246,3 +1246,24 @@ firrtl.module @SubtagNoCase(in %in : !firrtl.enum<None: uint<0>, Some: uint<8>>)
   // expected-error @below {{unknown field SomeOther in enum type}}
   %some = firrtl.subtag %in[SomeOther] : !firrtl.enum<None: uint<0>, Some: uint<8>>
 }
+
+// -----
+// firrtl.strictconnect non-'const' to 'const' flow is invalid
+
+firrtl.circuit "NonConstToConstStrictconnect" {
+firrtl.module @NonConstToConstStrictconnect(in %in : !firrtl.bundle<a: uint<1>, b: sint<2>>, out %out : !firrtl.bundle<a: const.uint<1>, b: sint<2>>) {
+  // expected-error @+1 {{failed to verify that operands are strictly connectable}}
+  firrtl.strictconnect %out, %in : !firrtl.bundle<a: const.uint<1>, b: sint<2>>, !firrtl.bundle<a: uint<1>, b: sint<2>>
+}
+}
+
+// -----
+// firrtl.ref.define non-'const' to 'const' flow is invalid
+
+firrtl.circuit "NonConstToConstRefDefine" {
+firrtl.module @NonConstToConstRefDefine(in %a: !firrtl.uint<1>, out %_a: !firrtl.probe<const.uint<1>>) {
+  %0 = firrtl.ref.send %a : !firrtl.uint<1>
+  // expected-error @+1 {{failed to verify that operands are strictly connectable}}
+  firrtl.ref.define %_a, %0 : !firrtl.probe<const.uint<1>>, !firrtl.probe<uint<1>>
+}
+}

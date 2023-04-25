@@ -733,6 +733,64 @@ bool firrtl::areTypesEquivalent(FIRRTLType destFType, FIRRTLType srcFType,
          widthlessDestType == widthlessSrcType.getConstType(false);
 }
 
+/// Returns whether the two types are strictly equivalent.  `srcFType` must be
+/// identical `destFType` except that 'const' sources can be connected to
+/// non-'const' sinks.
+bool firrtl::areTypesStrictlyEquivalent(FIRRTLType destFType,
+                                        FIRRTLType srcFType,
+                                        bool srcOuterTypeIsConst) {
+  // Identical types are always equivalent
+  if (destFType == srcFType)
+    return true;
+
+  auto destType = destFType.dyn_cast<FIRRTLBaseType>();
+  auto srcType = srcFType.dyn_cast<FIRRTLBaseType>();
+
+  // For non-base types, only equivalent if identical.
+  if (!destType || !srcType)
+    return false;
+
+  // Type constness must match for equivalence
+  if (destType.isConst() && !srcType.isConst() && !srcOuterTypeIsConst)
+    return false;
+
+  // Vector types can be connected if they have the same size and element type.
+  auto destVectorType = destType.dyn_cast<FVectorType>();
+  auto srcVectorType = srcType.dyn_cast<FVectorType>();
+  if (destVectorType && srcVectorType)
+    return destVectorType.getNumElements() == srcVectorType.getNumElements() &&
+           areTypesEquivalent(destVectorType.getElementType(),
+                              srcVectorType.getElementType(),
+                              srcVectorType.isConst());
+
+  // Bundle types can be connected if they have the same size, element names,
+  // and element types.
+  auto destBundleType = destType.dyn_cast<BundleType>();
+  auto srcBundleType = srcType.dyn_cast<BundleType>();
+  if (destBundleType && srcBundleType) {
+    auto destElements = destBundleType.getElements();
+    auto srcElements = srcBundleType.getElements();
+    size_t numDestElements = destElements.size();
+    if (numDestElements != srcElements.size())
+      return false;
+
+    for (size_t i = 0; i < numDestElements; ++i) {
+      auto destElement = destElements[i];
+      auto srcElement = srcElements[i];
+      if (destElement.name != srcElement.name ||
+          destElement.isFlip != srcElement.isFlip ||
+          !areTypesStrictlyEquivalent(destElement.type, srcElement.type,
+                                      srcOuterTypeIsConst))
+        return false;
+    }
+    return true;
+  }
+
+  // Ground types can be strictly connected if the source type is a const
+  // version of the destination type
+  return destType == srcType.getConstType(false);
+}
+
 /// Returns whether the two types are weakly equivalent.
 bool firrtl::areTypesWeaklyEquivalent(FIRRTLType destFType, FIRRTLType srcFType,
                                       bool destFlip, bool srcFlip,

@@ -568,7 +568,7 @@ circuit DefineWidths:
   module DefineWidths:
     input in : UInt<1>
     output p : Probe<UInt>
-    define p = probe(in) ; expected-error {{'firrtl.ref.define' op requires all operands to have the same type}}
+    define p = probe(in) ; expected-error {{'firrtl.ref.define' op failed to verify that operands are strictly connectable}}
 
 
 ;// -----
