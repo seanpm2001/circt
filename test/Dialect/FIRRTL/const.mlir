@@ -133,4 +133,45 @@ firrtl.module @ConstRegResetValue(in %clock: !firrtl.clock, in %reset: !firrtl.a
   %0 = firrtl.regreset %clock, %reset, %resetValue : !firrtl.clock, !firrtl.asyncreset, !firrtl.const.sint<1>, !firrtl.sint<1>
 }
 
+// CHECK-LABEL: firrtl.module @ConstCast
+firrtl.module @ConstCast(in %in: !firrtl.const.uint<1>, out %out: !firrtl.uint<1>) {
+  %0 = firrtl.constCast %in : (!firrtl.const.uint<1>) -> !firrtl.uint<1>
+  firrtl.strictconnect %out, %0 : !firrtl.uint<1> 
+}
+
+// CHECK-LABEL: firrtl.module @ConstCastToMixedConstBundle
+firrtl.module @ConstCastToMixedConstBundle(in %in: !firrtl.const.bundle<a: uint<1>>, out %out: !firrtl.bundle<a: const.uint<1>>) {
+  %0 = firrtl.constCast %in : (!firrtl.const.bundle<a: uint<1>>) -> !firrtl.bundle<a: const.uint<1>>
+  firrtl.strictconnect %out, %0 : !firrtl.bundle<a: const.uint<1>>
+}
+
+// CHECK-LABEL: firrtl.module @ConstCastToMixedConstVector
+firrtl.module @ConstCastToMixedConstVector(in %in: !firrtl.const.vector<uint<1>, 2>, out %out: !firrtl.vector<const.uint<1>, 2>) {
+  %0 = firrtl.constCast %in : (!firrtl.const.vector<uint<1>, 2>) -> !firrtl.vector<const.uint<1>, 2>
+  firrtl.strictconnect %out, %0 : !firrtl.vector<const.uint<1>, 2>
+}
+
+// Sub access of a ref to a const vector should always have a ref to a const result
+// CHECK-LABEL: firrtl.module @ConstRefVectorSub
+firrtl.module @ConstRefVectorSub(in %a: !firrtl.const.vector<uint<1>, 3>, out %_a: !firrtl.probe<const.uint<1>>) {
+  %0 = firrtl.ref.send %a : !firrtl.const.vector<uint<1>, 3>
+  %1 = firrtl.ref.sub %0[0] : !firrtl.probe<const.vector<uint<1>, 3>>
+  firrtl.ref.define %_a, %1 : !firrtl.probe<const.uint<1>>
+}
+
+// Sub access of a ref to a const bundle should always have a ref to a const result
+// CHECK-LABEL: firrtl.module @ConstRefBundleSub
+firrtl.module @ConstRefBundleSub(in %a: !firrtl.const.bundle<a: uint<1>, b: sint<2>>, out %_a: !firrtl.probe<const.uint<1>>) {
+  %0 = firrtl.ref.send %a : !firrtl.const.bundle<a: uint<1>, b: sint<2>>
+  %1 = firrtl.ref.sub %0[0] : !firrtl.probe<const.bundle<a: uint<1>, b: sint<2>>>
+  firrtl.ref.define %_a, %1 : !firrtl.probe<const.uint<1>>
+}
+
+// Test parsing/printing of multibit mux when constness of operands is mixed
+// CHECK-LABEL: firrtl.module @MixedConstMultibitMux
+firrtl.module @MixedConstMultibitMux(in %index: !firrtl.uint<2>, in %source_0: !firrtl.const.uint<1>, in %source_1: !firrtl.uint<1>, in %source_2: !firrtl.const.uint<1>) {
+  // CHECK-NEXT: [[VAL:%.+]] = firrtl.multibit_mux %index, %source_2, %source_1, %source_0 : !firrtl.uint<2>, !firrtl.const.uint<1>, !firrtl.uint<1>, !firrtl.const.uint<1>
+  %0 = firrtl.multibit_mux %index, %source_2, %source_1, %source_0 : !firrtl.uint<2>, !firrtl.const.uint<1>, !firrtl.uint<1>, !firrtl.const.uint<1>
+}
+
 }

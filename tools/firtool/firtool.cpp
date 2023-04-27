@@ -560,6 +560,8 @@ static LogicalResult processBuffer(
     }
   }
 
+  pm.nest<firrtl::CircuitOp>().nestAny().addPass(firrtl::createDropConstPass());
+
   if (dedup)
     pm.nest<firrtl::CircuitOp>().addPass(firrtl::createDedupPass());
 

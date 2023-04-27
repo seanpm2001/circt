@@ -133,6 +133,9 @@ public:
   /// Return a 'const' or non-'const' version of this type.
   FIRRTLBaseType getConstType(bool isConst);
 
+  /// Return this type with a 'const' modifiers dropped
+  FIRRTLBaseType getAllConstDroppedType();
+
   /// Return this type with all ground types replaced with UInt<1>.  This is
   /// used for `mem` operations.
   FIRRTLBaseType getMaskType();
@@ -204,6 +207,10 @@ bool areTypesEquivalent(FIRRTLType destType, FIRRTLType srcType,
 bool areTypesWeaklyEquivalent(FIRRTLType destType, FIRRTLType srcType,
                               bool destFlip = false, bool srcFlip = false,
                               bool srcOuterTypeIsConst = false);
+
+/// Returns whether the srcType can be const-casted to the destType.
+bool areTypesConstCastable(FIRRTLType destType, FIRRTLType srcType,
+                           bool srcOuterTypeIsConst = false);
 
 /// Returns true if the destination is at least as wide as a source.  The source
 /// and destination types must be equivalent non-analog types.  The types are
