@@ -19,6 +19,7 @@ add_circt_dialect_library(CIRCTFIRRTLTransforms
   InjectDUTHierarchy.cpp
   InnerSymbolDCE.cpp
   LegacyWiring.cpp
+  LinkCircuit.cpp
   LowerAnnotations.cpp
   LowerCHIRRTL.cpp
   LowerIntrinsics.cpp

@@ -100,6 +100,11 @@ def NameRefArrayAttr : TypedArrayAttrBase<NameRefAttr,
   let constBuilderCall = "$_builder.getArrayAttr($0)";
 }
 
+def InnerRefArrayAttr : TypedArrayAttrBase<HWInnerRefAttr,
+  "inner reference array attribute"> {
+  let constBuilderCall = "$_builder.getArrayAttr($0)";
+}
+
 def InnerSymProperties : AttrDef<HWDialect, "InnerSymProperties"> {
   let mnemonic = "innerSymProps";
   let parameters = (ins

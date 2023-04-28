@@ -296,6 +296,13 @@ static cl::opt<bool>
                         cl::desc("Scalarize the ports of any external modules"),
                         cl::init(true), cl::cat(mainCategory));
 
+static cl::list<std::string> linkedCircuitExportsFilenames(
+    "link-circuit-exports",
+    cl::desc(
+        "File containing mlir exports from a separately compiled circuit to "
+        "link with the current circuit"),
+    cl::value_desc("filename"), cl::cat(mainCategory));
+
 static bool isRandomEnabled(RandomKind kind) {
   return disableRandom != RandomKind::All && disableRandom != kind;
 }
@@ -681,6 +688,25 @@ static LogicalResult processBuffer(
     else
       pm.nest<firrtl::CircuitOp>().addPass(
           firrtl::createResolveTracesPass(outputAnnotationFilename.getValue()));
+
+    if (!linkedCircuitExportsFilenames.empty()) {
+      // Import exported info to link
+      for (const auto &filename : linkedCircuitExportsFilenames) {
+        llvm::SourceMgr sourceMgr;
+        auto file = MemoryBuffer::getFile(filename);
+        if (std::error_code error = file.getError()) {
+          llvm::errs() << "could not open linked file " << filename;
+          return failure();
+        }
+        sourceMgr.AddNewSourceBuffer(std::move(file.get()), llvm::SMLoc());
+        auto linkedModule = parseSourceFile<ModuleOp>(sourceMgr, &context);
+        for (auto &op : llvm::make_early_inc_range(
+                 linkedModule->getBody()->getOperations()))
+          op.moveAfter(&module->getBody()->back());
+      }
+
+      pm.addPass(firrtl::createLinkCircuitPass());
+    }
 
     // Lower the ref.resolve and ref.send ops and remove the RefType ports.
     // LowerToHW cannot handle RefType so, this pass must be run to remove all

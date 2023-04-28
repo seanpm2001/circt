@@ -656,4 +656,47 @@ def HierPathOp : HWOp<"hierpath",
     }];
 }
 
+def ExportableRefOp : HWOp<"exportableRef",
+      [IsolatedFromAbove, Symbol,
+       DeclareOpInterfaceMethods<InnerRefUserOpInterface>]> {
+  let summary = "Readies a named path for XMRs exportable across "
+                "compilation boundaries";
+  let description = [{
+    This represents a named path through the module hierarchy that prepares for
+    creating XMRs to the referenced element in a separate compilation process.
+
+    This is the initial representation of an exported reference and is internal to
+    the compilation process. Once Verilog name legalization has been performed,
+    this op is used to generate an `ExportRefOp` by remapping the module name
+    and names in the namepath.
+  }];
+  let arguments = (ins SymbolNameAttr:$sym_name, FlatSymbolRefAttr:$moduleName, StrAttr:$refName, InnerRefArrayAttr:$namepath);
+  let results = (outs);
+  let assemblyFormat = [{ $sym_name $moduleName $refName $namepath attr-dict }];
+  let builders = [
+    OpBuilder<(ins "FlatSymbolRefAttr":$moduleName,
+                   "StringAttr":$refName,
+                   "ArrayRef<Attribute>":$namepath)>
+  ];
+}
+
+def ExportRefOp : HWOp<"exportRef", [IsolatedFromAbove, Symbol]> {
+  let summary = "Exports a named path for XMRs across compilation boundaries";
+  let description = [{
+    This represents a named path through the module hierarchy that allows for
+    creating XMRs to the referenced element in a separate compilation process.
+
+    This is the final representation of a public reference, which is suitable
+    for isloated export and being imported by downstream clients.
+  }];
+  let arguments = (ins SymbolNameAttr:$sym_name, StrAttr:$moduleName, StrAttr:$refName, StrAttr:$internalPath);
+  let results = (outs);
+  let assemblyFormat = [{ $sym_name $moduleName $refName $internalPath attr-dict }];
+  let builders = [
+    OpBuilder<(ins "StringRef":$moduleName,
+                   "StringRef":$refName,
+                   "StringRef":$internalPath)>
+  ];
+}
+
 #endif // CIRCT_DIALECT_HW_HWSTRUCTURE_TD

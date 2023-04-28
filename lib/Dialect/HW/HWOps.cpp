@@ -3201,6 +3201,66 @@ ParseResult HierPathOp::parse(OpAsmParser &parser, OperationState &result) {
 }
 
 //===----------------------------------------------------------------------===//
+// ExportableRefOp
+//===----------------------------------------------------------------------===//
+
+void ExportableRefOp::build(OpBuilder &odsBuilder, OperationState &odsState,
+                            FlatSymbolRefAttr moduleName, StringAttr refName,
+                            ArrayRef<Attribute> namePath) {
+  auto symName = StringAttr::get(odsBuilder.getContext(),
+                                 "exportableRef." + moduleName.getValue() +
+                                     "." + refName.getValue());
+  build(odsBuilder, odsState, symName, moduleName, refName,
+        ArrayAttr::get(odsBuilder.getContext(), namePath));
+}
+
+LogicalResult ExportableRefOp::verifyInnerRefs(hw::InnerRefNamespace &ns) {
+  if (getNamepath().empty())
+    return emitOpError() << "the name path cannot be empty";
+
+  StringAttr expectedModuleName = {};
+  for (unsigned i = 0, s = getNamepath().size() - 1; i < s; ++i) {
+    hw::InnerRefAttr innerRef = getNamepath()[i].cast<hw::InnerRefAttr>();
+
+    if (expectedModuleName && expectedModuleName != innerRef.getModule())
+      return emitOpError() << "instance path is incorrect. Expected module: "
+                           << expectedModuleName
+                           << " instead found: " << innerRef.getModule();
+    HWInstanceLike instOp = ns.lookupOp<HWInstanceLike>(innerRef);
+    if (!instOp)
+      return emitOpError() << " module: " << innerRef.getModule()
+                           << " does not contain any instance with symbol: "
+                           << innerRef.getName();
+    expectedModuleName = instOp.getReferencedModuleNameAttr();
+  }
+
+  // The instance path has been verified. Now verify the last element.
+  auto leafRef =
+      getNamepath()[getNamepath().size() - 1].cast<hw::InnerRefAttr>();
+  if (!ns.lookup(leafRef))
+    return emitOpError() << " operation with symbol: " << leafRef
+                         << " was not found ";
+
+  if (expectedModuleName && expectedModuleName != leafRef.getModule())
+    return emitOpError() << "instance path is incorrect. Expected module: "
+                         << expectedModuleName
+                         << " instead found: " << leafRef.getModule();
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// ExportRefOp
+//===----------------------------------------------------------------------===//
+
+void ExportRefOp::build(OpBuilder &odsBuilder, OperationState &odsState,
+                        StringRef moduleName, StringRef refName,
+                        StringRef internalPath) {
+  auto symName = ("exportRef." + moduleName + "." + refName).str();
+  build(odsBuilder, odsState, symName, moduleName, refName, internalPath);
+}
+
+//===----------------------------------------------------------------------===//
 // TableGen generated logic.
 //===----------------------------------------------------------------------===//
 

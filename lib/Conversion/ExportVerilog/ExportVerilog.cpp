@@ -5144,6 +5144,33 @@ void ModuleEmitter::emitHWModule(HWModuleOp module) {
   currentModuleOp = HWModuleOp();
 }
 
+static void emitExportableRef(VerilogEmitterState &state, ExportableRefOp op) {
+  auto exportedModuleName =
+      getSymOpName(state.symbolCache.getDefinition(op.getModuleNameAttr()));
+
+  SmallString<128> internalPath;
+  for (auto sym : op.getNamepathAttr().getValue()) {
+    auto innerRef = cast<InnerRefAttr>(sym);
+    auto ref = state.symbolCache.getInnerDefinition(innerRef.getModule(),
+                                                    innerRef.getName());
+
+    if (!internalPath.empty())
+      internalPath.append(".");
+
+    if (ref.hasPort()) {
+      internalPath.append(getPortVerilogName(ref.getOp(), ref.getPort()));
+      continue;
+    }
+
+    internalPath.append(getSymOpName(ref.getOp()));
+  }
+
+  ImplicitLocOpBuilder builder(op->getLoc(), op);
+  auto exportRef = builder.create<ExportRefOp>(exportedModuleName,
+                                               op.getRefName(), internalPath);
+  state.os << exportRef << '\n';
+}
+
 //===----------------------------------------------------------------------===//
 // Top level "file" emitter logic
 //===----------------------------------------------------------------------===//
@@ -5300,6 +5327,9 @@ void SharedEmitterState::gatherFiles(bool separateModules) {
         .Case<HierPathOp>([&](HierPathOp hierPathOp) {
           symbolCache.addDefinition(hierPathOp.getSymNameAttr(), hierPathOp);
         })
+        .Case<ExportableRefOp>([&](ExportableRefOp exportableRefOp) {
+          separateFile(exportableRefOp, "exports.mlir");
+        })
         .Case<TypeScopeOp>([&](TypeScopeOp op) {
           symbolCache.addDefinition(op.getNameAttr(), op);
           // TODO: How do we want to handle typedefs in a split output?
@@ -5385,6 +5415,8 @@ static void emitOperation(VerilogEmitterState &state, Operation *op) {
       .Case<TypeScopeOp>([&](auto typedecls) {
         ModuleEmitter(state).emitStatement(typedecls);
       })
+      .Case<ExportableRefOp>(
+          [&](ExportableRefOp op) { emitExportableRef(state, op); })
       .Default([&](auto *op) {
         state.encounteredError = true;
         op->emitError("unknown operation");

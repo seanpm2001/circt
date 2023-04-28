@@ -253,6 +253,9 @@ class LowerXMRPass : public LowerXMRBase<LowerXMRPass> {
     for (auto *op : forceAndReleaseOps)
       if (failed(handleForceReleaseOp(op)))
         return signalPassFailure();
+    if (failed(handleTopModuleRefPorts()))
+      return signalPassFailure();
+
     garbageCollect();
   }
 
@@ -415,6 +418,39 @@ class LowerXMRPass : public LowerXMRBase<LowerXMRPass> {
             dataFlowClasses.getOrInsertLeaderValue(instanceResult));
       }
     }
+    return success();
+  }
+
+  LogicalResult handleTopModuleRefPorts() {
+    auto topModule = dyn_cast<FModuleOp>(getOperation().getMainModule());
+    if (!topModule)
+      return success();
+
+    auto builder = ImplicitLocOpBuilder::atBlockBegin(
+        topModule.getLoc(), getOperation().getBodyBlock());
+
+    for (size_t portIndex = 0, numPorts = topModule.getNumPorts();
+         portIndex != numPorts; ++portIndex) {
+      auto refType = topModule.getPortType(portIndex).dyn_cast<RefType>();
+      if (!refType || isZeroWidth(refType.getType()) ||
+          topModule.getPortDirection(portIndex) != Direction::Out)
+        continue;
+      auto portValue = topModule.getArgument(portIndex);
+      auto remoteOpPath = getRemoteRefSend(portValue);
+      if (!remoteOpPath)
+        return failure();
+      SmallVector<Attribute> refSendPath;
+      while (remoteOpPath) {
+        auto entr = refSendPathList[*remoteOpPath];
+        refSendPath.push_back(entr.first);
+        remoteOpPath = entr.second;
+      }
+
+      builder.create<hw::ExportableRefOp>(
+          FlatSymbolRefAttr::get(topModule.getNameAttr()),
+          topModule.getPortNameAttr(portIndex), refSendPath);
+    }
+
     return success();
   }
 

@@ -97,8 +97,8 @@ def IMConstProp : Pass<"firrtl-imconstprop", "firrtl::CircuitOp"> {
 def RegisterOptimizer : Pass<"firrtl-register-optimizer", "firrtl::FModuleOp"> {
   let summary = "Optimizer Registers";
   let description = [{
-    This pass applies classic FIRRTL register optimizations.  These 
-    optimizations are isolated to this pass as they can change the visible 
+    This pass applies classic FIRRTL register optimizations.  These
+    optimizations are isolated to this pass as they can change the visible
     behavior of the register, especially before reset.
   }];
   let constructor = "circt::firrtl::createRegisterOptimizerPass()";
@@ -680,6 +680,16 @@ def VBToBV : Pass<"firrtl-vb-to-bv", "firrtl::CircuitOp"> {
     vectors.
   }];
   let constructor = "circt::firrtl::createVBToBVPass()";
+}
+
+def LinkCircuit : Pass<"firrtl-link-circuit", "mlir::ModuleOp"> {
+  let summary = "Link the circuit using exported info from other circuits";
+  let description = [{
+    For every ExtModule in the target circuit that is defined in an external
+    circuit, linking provides ref-type path resolution information.
+  }];
+  let constructor = "circt::firrtl::createLinkCircuitPass()";
+  let dependentDialects = ["hw::HWDialect"];
 }
 
 #endif // CIRCT_DIALECT_FIRRTL_PASSES_TD
