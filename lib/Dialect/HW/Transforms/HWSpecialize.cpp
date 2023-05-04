@@ -36,7 +36,7 @@ namespace {
 // provided 'parameters'.
 static std::string generateModuleName(Namespace &ns, hw::HWModuleOp moduleOp,
                                       ArrayAttr parameters) {
-  assert(parameters.size() != 0);
+  assert(!parameters.empty());
   std::string name = moduleOp.getName().str();
   for (auto param : parameters) {
     auto paramAttr = param.cast<ParamDeclAttr>();
@@ -80,7 +80,7 @@ static hw::HWModuleOp targetModuleOp(hw::InstanceOp instanceOp,
   if (!targetHWModule)
     return {}; // Won't specialize external modules.
 
-  if (targetHWModule.getParameters().size() == 0)
+  if (targetHWModule.getParameters().empty())
     return {}; // nothing to record or specialize
 
   return targetHWModule;
@@ -385,7 +385,7 @@ void HWSpecializePass::runOnOperation() {
   while (!registry.uniqueModuleParameters.empty()) {
     // The registry for the next specialization loop
     ParameterSpecializationRegistry nextRegistry;
-    for (auto it : registry.uniqueModuleParameters) {
+    for (const auto &it : registry.uniqueModuleParameters) {
       for (auto parameters : it.second) {
         HWModuleOp specializedModule;
         if (failed(specializeModule(builder, parameters, sc, ns, it.first,

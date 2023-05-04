@@ -322,29 +322,30 @@ LogicalResult ConstantOp::verify() {
 
 /// Build a ConstantOp from an APInt, infering the result type from the
 /// width of the APInt.
-void ConstantOp::build(OpBuilder &builder, OperationState &result,
+void ConstantOp::build(OpBuilder &odsBuilder, OperationState &odsState,
                        const APInt &value) {
 
-  auto type = IntegerType::get(builder.getContext(), value.getBitWidth());
-  auto attr = builder.getIntegerAttr(type, value);
-  return build(builder, result, type, attr);
+  auto type = IntegerType::get(odsBuilder.getContext(), value.getBitWidth());
+  auto attr = odsBuilder.getIntegerAttr(type, value);
+  return build(odsBuilder, odsState, type, attr);
 }
 
 /// Build a ConstantOp from an APInt, infering the result type from the
 /// width of the APInt.
-void ConstantOp::build(OpBuilder &builder, OperationState &result,
+void ConstantOp::build(OpBuilder &odsBuilder, OperationState &odsState,
                        IntegerAttr value) {
-  return build(builder, result, value.getType(), value);
+  return build(odsBuilder, odsState, value.getType(), value);
 }
 
 /// This builder allows construction of small signed integers like 0, 1, -1
 /// matching a specified MLIR IntegerType.  This shouldn't be used for general
 /// constant folding because it only works with values that can be expressed in
 /// an int64_t.  Use APInt's instead.
-void ConstantOp::build(OpBuilder &builder, OperationState &result, Type type,
-                       int64_t value) {
+void ConstantOp::build(OpBuilder &odsBuilder, OperationState &odsState,
+                       Type type, int64_t value) {
   auto numBits = type.cast<IntegerType>().getWidth();
-  build(builder, result, APInt(numBits, (uint64_t)value, /*isSigned=*/true));
+  build(odsBuilder, odsState,
+        APInt(numBits, (uint64_t)value, /*isSigned=*/true));
 }
 
 void ConstantOp::getAsmResultNames(
@@ -403,27 +404,27 @@ OpFoldResult WireOp::fold(FoldAdaptor adaptor) {
   return {};
 }
 
-LogicalResult WireOp::canonicalize(WireOp wire, PatternRewriter &rewriter) {
+LogicalResult WireOp::canonicalize(WireOp op, PatternRewriter &rewriter) {
   // Block if the wire has any attributes.
-  if (hasAdditionalAttributes(wire, {"sv.namehint"}))
+  if (hasAdditionalAttributes(op, {"sv.namehint"}))
     return failure();
 
   // If the wire has a symbol, then we can't delete it.
-  if (wire.getInnerSymAttr())
+  if (op.getInnerSymAttr())
     return failure();
 
   // If the wire has a name or an `sv.namehint` attribute, propagate it as an
   // `sv.namehint` to the expression.
-  if (auto *inputOp = wire.getInput().getDefiningOp()) {
-    auto name = wire.getNameAttr();
+  if (auto *inputOp = op.getInput().getDefiningOp()) {
+    auto name = op.getNameAttr();
     if (!name || name.getValue().empty())
-      name = wire->getAttrOfType<StringAttr>("sv.namehint");
+      name = op->getAttrOfType<StringAttr>("sv.namehint");
     if (name)
       rewriter.updateRootInPlace(
           inputOp, [&] { inputOp->setAttr("sv.namehint", name); });
   }
 
-  rewriter.replaceOp(wire, wire.getInput());
+  rewriter.replaceOp(op, op.getInput());
   return success();
 }
 
@@ -837,21 +838,21 @@ void hw::modifyModulePorts(
   moduleOp->setAttr("resultLocs", ArrayAttr::get(context, newResultLocs));
 }
 
-void HWModuleOp::build(OpBuilder &builder, OperationState &result,
+void HWModuleOp::build(OpBuilder &odsBuilder, OperationState &odsState,
                        StringAttr name, const ModulePortInfo &ports,
                        ArrayAttr parameters,
                        ArrayRef<NamedAttribute> attributes, StringAttr comment,
                        bool shouldEnsureTerminator) {
-  buildModule<HWModuleOp>(builder, result, name, ports, parameters, attributes,
-                          comment);
+  buildModule<HWModuleOp>(odsBuilder, odsState, name, ports, parameters,
+                          attributes, comment);
 
   // Create a region and a block for the body.
-  auto *bodyRegion = result.regions[0].get();
+  auto *bodyRegion = odsState.regions[0].get();
   Block *body = new Block();
   bodyRegion->push_back(body);
 
   // Add arguments to the body block.
-  auto unknownLoc = builder.getUnknownLoc();
+  auto unknownLoc = odsBuilder.getUnknownLoc();
   for (auto port : ports.inputs) {
     auto loc = port.loc ? Location(port.loc) : unknownLoc;
     auto type = port.type;
@@ -861,16 +862,16 @@ void HWModuleOp::build(OpBuilder &builder, OperationState &result,
   }
 
   if (shouldEnsureTerminator)
-    HWModuleOp::ensureTerminator(*bodyRegion, builder, result.location);
+    HWModuleOp::ensureTerminator(*bodyRegion, odsBuilder, odsState.location);
 }
 
-void HWModuleOp::build(OpBuilder &builder, OperationState &result,
+void HWModuleOp::build(OpBuilder &odsBuilder, OperationState &odsState,
                        StringAttr name, ArrayRef<PortInfo> ports,
                        ArrayAttr parameters,
                        ArrayRef<NamedAttribute> attributes,
                        StringAttr comment) {
-  build(builder, result, name, ModulePortInfo(ports), parameters, attributes,
-        comment);
+  build(odsBuilder, odsState, name, ModulePortInfo(ports), parameters,
+        attributes, comment);
 }
 
 void HWModuleOp::build(OpBuilder &builder, OperationState &odsState,
@@ -916,23 +917,23 @@ StringAttr HWModuleGeneratedOp::getVerilogModuleNameAttr() {
       ::mlir::SymbolTable::getSymbolAttrName());
 }
 
-void HWModuleExternOp::build(OpBuilder &builder, OperationState &result,
+void HWModuleExternOp::build(OpBuilder &odsBuilder, OperationState &odsState,
                              StringAttr name, const ModulePortInfo &ports,
                              StringRef verilogName, ArrayAttr parameters,
                              ArrayRef<NamedAttribute> attributes) {
-  buildModule<HWModuleExternOp>(builder, result, name, ports, parameters,
+  buildModule<HWModuleExternOp>(odsBuilder, odsState, name, ports, parameters,
                                 attributes, {});
 
   if (!verilogName.empty())
-    result.addAttribute("verilogName", builder.getStringAttr(verilogName));
+    odsState.addAttribute("verilogName", odsBuilder.getStringAttr(verilogName));
 }
 
-void HWModuleExternOp::build(OpBuilder &builder, OperationState &result,
+void HWModuleExternOp::build(OpBuilder &odsBuilder, OperationState &odsState,
                              StringAttr name, ArrayRef<PortInfo> ports,
                              StringRef verilogName, ArrayAttr parameters,
                              ArrayRef<NamedAttribute> attributes) {
-  build(builder, result, name, ModulePortInfo(ports), verilogName, parameters,
-        attributes);
+  build(odsBuilder, odsState, name, ModulePortInfo(ports), verilogName,
+        parameters, attributes);
 }
 
 void HWModuleExternOp::modifyPorts(
@@ -946,24 +947,24 @@ void HWModuleExternOp::modifyPorts(
 void HWModuleExternOp::appendOutputs(
     ArrayRef<std::pair<StringAttr, Value>> outputs) {}
 
-void HWModuleGeneratedOp::build(OpBuilder &builder, OperationState &result,
+void HWModuleGeneratedOp::build(OpBuilder &odsBuilder, OperationState &odsState,
                                 FlatSymbolRefAttr genKind, StringAttr name,
                                 const ModulePortInfo &ports,
                                 StringRef verilogName, ArrayAttr parameters,
                                 ArrayRef<NamedAttribute> attributes) {
-  buildModule<HWModuleGeneratedOp>(builder, result, name, ports, parameters,
-                                   attributes, {});
-  result.addAttribute("generatorKind", genKind);
+  buildModule<HWModuleGeneratedOp>(odsBuilder, odsState, name, ports,
+                                   parameters, attributes, {});
+  odsState.addAttribute("generatorKind", genKind);
   if (!verilogName.empty())
-    result.addAttribute("verilogName", builder.getStringAttr(verilogName));
+    odsState.addAttribute("verilogName", odsBuilder.getStringAttr(verilogName));
 }
 
-void HWModuleGeneratedOp::build(OpBuilder &builder, OperationState &result,
+void HWModuleGeneratedOp::build(OpBuilder &odsBuilder, OperationState &odsState,
                                 FlatSymbolRefAttr genKind, StringAttr name,
                                 ArrayRef<PortInfo> ports, StringRef verilogName,
                                 ArrayAttr parameters,
                                 ArrayRef<NamedAttribute> attributes) {
-  build(builder, result, genKind, name, ModulePortInfo(ports), verilogName,
+  build(odsBuilder, odsState, genKind, name, ModulePortInfo(ports), verilogName,
         parameters, attributes);
 }
 
@@ -1104,10 +1105,8 @@ PortInfo hw::getModuleOutputPort(Operation *op, size_t idx) {
 }
 
 static bool hasAttribute(StringRef name, ArrayRef<NamedAttribute> attrs) {
-  for (auto &argAttr : attrs)
-    if (argAttr.getName() == name)
-      return true;
-  return false;
+  return llvm::any_of(attrs,
+                      [&](auto argAttr) { return argAttr.getName() == name; });
 }
 
 template <typename ModuleTy>
@@ -1483,17 +1482,17 @@ LogicalResult HWModuleOp::verifyBody() { return success(); }
 //===----------------------------------------------------------------------===//
 
 /// Create a instance that refers to a known module.
-void InstanceOp::build(OpBuilder &builder, OperationState &result,
+void InstanceOp::build(OpBuilder &odsBuilder, OperationState &odsState,
                        Operation *module, StringAttr name,
                        ArrayRef<Value> inputs, ArrayAttr parameters,
                        StringAttr sym_name) {
   if (!parameters)
-    parameters = builder.getArrayAttr({});
+    parameters = odsBuilder.getArrayAttr({});
 
   auto [argNames, resultNames] =
       instance_like_impl::getHWModuleArgAndResultNames(module);
   FunctionType modType = getModuleType(module);
-  build(builder, result, modType.getResults(), name,
+  build(odsBuilder, odsState, modType.getResults(), name,
         FlatSymbolRefAttr::get(SymbolTable::getSymbolName(module)), inputs,
         argNames, resultNames, parameters, sym_name);
 }
@@ -1658,17 +1657,16 @@ LogicalResult OutputOp::verify() {
 //===----------------------------------------------------------------------===//
 
 LogicalResult
-GlobalRefOp::verifySymbolUses(mlir::SymbolTableCollection &symTables) {
+GlobalRefOp::verifySymbolUses(mlir::SymbolTableCollection &symbolTable) {
   Operation *parent = (*this)->getParentOp();
-  SymbolTable &symTable = symTables.getSymbolTable(parent);
+  SymbolTable &symTable = symbolTable.getSymbolTable(parent);
   StringAttr symNameAttr = (*this).getSymNameAttr();
   auto hasGlobalRef = [&](Attribute attr) -> bool {
     if (!attr)
       return false;
-    for (auto ref : attr.cast<ArrayAttr>().getAsRange<GlobalRefAttr>())
-      if (ref.getGlblSym().getAttr() == symNameAttr)
-        return true;
-    return false;
+    return llvm::any_of(
+        attr.cast<ArrayAttr>().getAsRange<GlobalRefAttr>(),
+        [&](auto ref) { return ref.getGlblSym().getAttr() == symNameAttr; });
   };
   // For all inner refs in the namepath, ensure they have a corresponding
   // GlobalRefAttr to this GlobalRefOp.
@@ -1762,7 +1760,7 @@ ParseResult ArrayCreateOp::parse(OpAsmParser &parser, OperationState &result) {
       parser.parseType(elemType))
     return failure();
 
-  if (operands.size() == 0)
+  if (operands.empty())
     return parser.emitError(inputOperandsLoc,
                             "Cannot construct an array of length 0");
   result.addTypes({ArrayType::get(elemType, operands.size())});
@@ -1780,15 +1778,15 @@ void ArrayCreateOp::print(OpAsmPrinter &p) {
   p << " : " << getInputs()[0].getType();
 }
 
-void ArrayCreateOp::build(OpBuilder &b, OperationState &state,
-                          ValueRange values) {
-  assert(values.size() > 0 && "Cannot build array of zero elements");
-  Type elemType = values[0].getType();
+void ArrayCreateOp::build(OpBuilder &odsBuilder, OperationState &odsState,
+                          ValueRange inputs) {
+  assert(!inputs.empty() && "Cannot build array of zero elements");
+  Type elemType = inputs[0].getType();
   assert(llvm::all_of(
-             values,
+             inputs,
              [elemType](Value v) -> bool { return v.getType() == elemType; }) &&
          "All values must have same type.");
-  build(b, state, ArrayType::get(elemType, values.size()), values);
+  build(odsBuilder, odsState, ArrayType::get(elemType, inputs.size()), inputs);
 }
 
 LogicalResult ArrayCreateOp::verify() {
@@ -1947,7 +1945,7 @@ LogicalResult ArraySliceOp::canonicalize(ArraySliceOp op,
   if (!offsetOpt)
     return failure();
 
-  auto inputOp = op.getInput().getDefiningOp();
+  auto *inputOp = op.getInput().getDefiningOp();
   if (auto inputSlice = dyn_cast_or_null<ArraySliceOp>(inputOp)) {
     // slice(slice(a, n), m) -> slice(a, n + m)
     if (inputSlice == op)
@@ -2012,7 +2010,7 @@ LogicalResult ArraySliceOp::canonicalize(ArraySliceOp op,
         break;
     }
 
-    assert(chunks.size() > 0 && "missing sliced items");
+    assert(!chunks.empty() && "missing sliced items");
     if (chunks.size() == 1)
       rewriter.replaceOp(op, chunks[0]);
     else
@@ -2062,12 +2060,12 @@ static void printArrayConcatTypes(OpAsmPrinter &p, Operation *,
   llvm::interleaveComma(inputTypes, p, [&p](Type t) { p << t; });
 }
 
-void ArrayConcatOp::build(OpBuilder &b, OperationState &state,
-                          ValueRange values) {
-  assert(!values.empty() && "Cannot build array of zero elements");
-  ArrayType arrayTy = values[0].getType().cast<ArrayType>();
+void ArrayConcatOp::build(OpBuilder &odsBuilder, OperationState &odsState,
+                          ValueRange inputs) {
+  assert(!inputs.empty() && "Cannot build array of zero elements");
+  ArrayType arrayTy = inputs[0].getType().cast<ArrayType>();
   Type elemTy = arrayTy.getElementType();
-  assert(llvm::all_of(values,
+  assert(llvm::all_of(inputs,
                       [elemTy](Value v) -> bool {
                         return v.getType().isa<ArrayType>() &&
                                v.getType().cast<ArrayType>().getElementType() ==
@@ -2076,9 +2074,9 @@ void ArrayConcatOp::build(OpBuilder &b, OperationState &state,
          "All values must be of ArrayType with the same element type.");
 
   uint64_t resultSize = 0;
-  for (Value val : values)
+  for (Value val : inputs)
     resultSize += val.getType().cast<ArrayType>().getSize();
-  build(b, state, ArrayType::get(elemTy, resultSize), values);
+  build(odsBuilder, odsState, ArrayType::get(elemTy, resultSize), inputs);
 }
 
 OpFoldResult ArrayConcatOp::fold(FoldAdaptor adaptor) {
@@ -2486,7 +2484,7 @@ OpFoldResult StructExtractOp::fold(FoldAdaptor) {
 
 LogicalResult StructExtractOp::canonicalize(StructExtractOp op,
                                             PatternRewriter &rewriter) {
-  auto inputOp = op.getInput().getDefiningOp();
+  auto *inputOp = op.getInput().getDefiningOp();
 
   // b = extract(inject(x["a"], v0)["b"]) => extract(x, "b")
   if (auto structInject = dyn_cast_or_null<StructInjectOp>(inputOp)) {
@@ -2671,14 +2669,13 @@ void UnionExtractOp::print(OpAsmPrinter &printer) {
   printExtractOp(printer, *this);
 }
 
-LogicalResult UnionExtractOp::inferReturnTypes(MLIRContext *context,
-                                               std::optional<Location> loc,
-                                               ValueRange operands,
-                                               DictionaryAttr attrs,
-                                               mlir::RegionRange regions,
-                                               SmallVectorImpl<Type> &results) {
-  results.push_back(cast<UnionType>(getCanonicalType(operands[0].getType()))
-                        .getFieldType(attrs.getAs<StringAttr>("field")));
+LogicalResult UnionExtractOp::inferReturnTypes(
+    MLIRContext *context, std::optional<Location> location, ValueRange operands,
+    DictionaryAttr attributes, mlir::RegionRange regions,
+    SmallVectorImpl<Type> &inferredReturnTypes) {
+  inferredReturnTypes.push_back(
+      cast<UnionType>(getCanonicalType(operands[0].getType()))
+          .getFieldType(attributes.getAs<StringAttr>("field")));
   return success();
 }
 

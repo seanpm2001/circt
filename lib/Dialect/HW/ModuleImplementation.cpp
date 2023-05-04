@@ -96,7 +96,7 @@ ParseResult module_like_impl::parseModuleFunctionSignature(
 
   // Parse the argument list.
   if (parser.parseArgumentList(args, OpAsmParser::Delimiter::Paren,
-                               /*allowTypes=*/true, /*allowAttrs=*/true))
+                               /*allowType=*/true, /*allowAttrs=*/true))
     return failure();
 
   // Parse the result list.
