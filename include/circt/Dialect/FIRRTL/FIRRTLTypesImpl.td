@@ -335,6 +335,22 @@ def BundleImpl : BaseBundleTypeImpl<"Bundle","::circt::firrtl::FIRRTLBaseType", 
 
 def OpenBundleImpl : BaseBundleTypeImpl<"OpenBundle","::circt::firrtl::FIRRTLType", [DeclareTypeInterfaceMethods<FieldIDTypeInterface>]>;
 
+def TypeAliasImpl : FIRRTLImplType<"TypeAlias"> {
+  let summary = "type alias";
+  let parameters =
+    (ins  "StringAttr":$name, TypeParameter<"::circt::firrtl::FIRRTLType",
+                            "An inner type">:$innerType);
+  let storageClass = "TypeAliasStorage";
+  let genAccessors = true;
+  let genVerifyDecl = true;
+  let skipDefaultBuilders = true;
+  let builders = [
+    TypeBuilderWithInferredContext<(ins
+    "::mlir::StringAttr":$name,
+    "::circt::firrtl::FIRRTLType":$innerType)>
+  ];
+}
+
 def FEnumImpl : FIRRTLImplType<"FEnum", [FieldIDTypeInterface]> {
   let summary = "a sum type of named elements.";
   let parameters = (ins "ArrayRef<EnumElement>":$elements, "bool":$isConst);

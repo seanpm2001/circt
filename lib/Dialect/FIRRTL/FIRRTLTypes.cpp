@@ -143,6 +143,7 @@ void circt::firrtl::printNestedType(Type type, AsmPrinter &os) {
 ///   ::= enum '<' (enum-elt (',' enum-elt)*)? '>'
 ///   ::= vector '<' type ',' int '>'
 ///   ::= const '.' type
+///   ::= alias '<' identifier, type '>'
 ///
 /// bundle-elt ::= identifier flip? ':' type
 /// enum-elt ::= identifier ':' type
@@ -1824,6 +1825,42 @@ auto FEnumType::verify(function_ref<InFlightDiagnostic()> emitErrorFn,
     // TODO: exclude reference containing
   }
   return success();
+}
+
+//===----------------------------------------------------------------------===//
+// TypeAliasType
+//===----------------------------------------------------------------------===//
+
+struct circt::firrtl::detail::TypeAliasStorage : detail::FIRRTLBaseTypeStorage {
+  using KeyTy = std::tuple<StringAttr, FIRRTLType>;
+
+  TypeAliasStorage(StringAttr name, FIRRTLType innerType)
+      : detail::FIRRTLBaseTypeStorage(innerType.isConst()), name(name),
+        innerType(innerType),
+        // TODO:
+        anoymousType(innerType) {}
+
+  bool operator==(const KeyTy &key) const {
+    return key == KeyTy(name, innerType);
+  }
+
+  static llvm::hash_code hashKey(const KeyTy &key) {
+    return llvm::hash_combine(key);
+  }
+
+  static TypeAliasStorage *construct(TypeStorageAllocator &allocator,
+                                     KeyTy key) {
+    return new (allocator.allocate<TypeAliasStorage>())
+        TypeAliasStorage(std::get<0>(key), std::get<1>(key));
+  }
+  StringAttr name;
+  FIRRTLType innerType;
+  FIRRTLType anoymousType;
+};
+
+auto TypeAliasType::get(StringAttr name, FIRRTLType innerType)
+    -> TypeAliasType {
+  return Base::get(name.getContext(), name, innerType);
 }
 
 //===----------------------------------------------------------------------===//
