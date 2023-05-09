@@ -711,6 +711,14 @@ static LogicalResult processBuffer(
         modulePM.addPass(createCSEPass());
       }
 
+      if (extractTestCode)
+        pm.addPass(sv::createSVExtractTestCodePass(etcDisableInstanceExtraction,
+                                                   etcDisableModuleInlining));
+
+      modulePM.addPass(createSimpleCanonicalizerPass());
+      modulePM.addPass(createCSEPass());
+
+
       pm.nest<hw::HWModuleOp>().addPass(seq::createSeqFIRRTLLowerToSVPass(
           {/*disableRandomization=*/!isRandomEnabled(RandomKind::Reg),
            /*addVivadoRAMAddressConflictSynthesisBugWorkaround=*/
@@ -719,10 +727,6 @@ static LogicalResult processBuffer(
           replSeqMem, ignoreReadEnableMem, addMuxPragmas,
           !isRandomEnabled(RandomKind::Mem), !isRandomEnabled(RandomKind::Reg),
           addVivadoRAMAddressConflictSynthesisBugWorkaround));
-
-      if (extractTestCode)
-        pm.addPass(sv::createSVExtractTestCodePass(etcDisableInstanceExtraction,
-                                                   etcDisableModuleInlining));
 
       // If enabled, run the optimizer.
       if (!disableOptimization) {
