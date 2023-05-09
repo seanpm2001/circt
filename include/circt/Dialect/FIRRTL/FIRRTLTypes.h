@@ -54,6 +54,8 @@ struct RecursiveTypeProperties {
   bool containsAnalog : 1;
   /// Whether the type contains a const type.
   bool containsConst : 1;
+  /// Whether the type contains a type alias.
+  bool isAnonymous : 1;
   /// Whether the type has any uninferred bit widths.
   bool hasUninferredWidth : 1;
   /// Whether the type has any uninferred reset.
@@ -72,6 +74,8 @@ public:
   /// `containsAnalog`, and `hasUninferredWidth` bits, among others.
   RecursiveTypeProperties getRecursiveTypeProperties() const;
 
+  FIRRTLType getAnonymousType();
+
   //===--------------------------------------------------------------------===//
   // Convenience methods for accessing recursive type properties
   //===--------------------------------------------------------------------===//
@@ -86,6 +90,8 @@ public:
   bool containsReference() {
     return getRecursiveTypeProperties().containsReference;
   }
+
+  bool isAnonymousType() { return getRecursiveTypeProperties().isAnonymous; }
 
   /// Return true if this type contains an uninferred bit width.
   bool hasUninferredWidth() {
@@ -132,6 +138,9 @@ public:
 
   /// Return a 'const' or non-'const' version of this type.
   FIRRTLBaseType getConstType(bool isConst);
+
+  /// Return a anonymous version of this type.
+  FIRRTLBaseType getAnonymousType();
 
   /// Return this type with all ground types replaced with UInt<1>.  This is
   /// used for `mem` operations.
