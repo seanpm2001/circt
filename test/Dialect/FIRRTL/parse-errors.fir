@@ -630,3 +630,10 @@ circuit NodeProbe:
   module NodeProbe:
     inst r of Ref
     node n = r.x ; expected-error {{Node cannot be analog and must be passive or passive under a flip}}
+
+// -----
+FIRRTL version 2.0.0
+circuit Top:
+  type WordType = UInt<32> ; expected-error {{type alias is not supported in this version}}
+  module Top:
+    input in: WordType
