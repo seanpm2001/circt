@@ -308,8 +308,7 @@ ParseResult parseNestedBaseType(FIRRTLBaseType &result, AsmParser &parser);
 // Print a FIRRTL type without a leading `!firrtl.` dialect tag.
 void printNestedType(Type type, AsmPrinter &os);
 
-using FIRRTLValue = mlir::TypedValue<FIRRTLType>;
-using FIRRTLBaseValue = mlir::TypedValue<FIRRTLBaseType>;
+
 
 } // namespace firrtl
 } // namespace circt
@@ -337,5 +336,88 @@ struct DenseMapInfo<circt::firrtl::FIRRTLType> {
 };
 
 } // namespace llvm
+namespace circt {
+namespace firrtl {
+template <typename... BaseTy>
+bool type_isa(Type type) {
+  // First check if the type is the requested type.
+  if (type.isa<BaseTy...>())
+    return true;
+
+  // Then check if it is a type alias wrapping the requested type.
+  if (auto alias = type.dyn_cast<BaseTypeAliasType>())
+    return alias.getInnerType().isa<BaseTy...>();
+
+  return false;
+}
+
+// type_isa for a nullable argument.
+template <typename... BaseTy>
+bool type_isa_and_nonnull(Type type) { // NOLINT(readability-identifier-naming)
+  if (!type)
+    return false;
+  return type_isa<BaseTy...>(type);
+}
+
+template <typename BaseTy>
+BaseTy type_cast(Type type) {
+  assert(type_isa<BaseTy>(type) && "type must convert to requested type");
+
+  // If the type is the requested type, return it.
+  if (type.isa<BaseTy>())
+    return type.cast<BaseTy>();
+
+  // Otherwise, it must be a type alias wrapping the requested type.
+  return type.cast<BaseTypeAliasType>().getInnerType().cast<BaseTy>();
+}
+
+template <typename BaseTy>
+BaseTy type_dyn_cast(Type type) {
+  if (!type_isa<BaseTy>(type))
+    return BaseTy();
+
+  return type_cast<BaseTy>(type);
+}
+
+/// Utility type that wraps a type that may be one of several possible Types.
+/// This is similar to std::variant but is implemented for mlir::Type, and it
+/// understands how to handle type aliases.
+template <typename... Types>
+class TypeVariant
+    : public ::mlir::Type::TypeBase<TypeVariant<Types...>, mlir::Type,
+                                    mlir::TypeStorage> {
+  using mlir::Type::TypeBase<TypeVariant<Types...>, mlir::Type,
+                             mlir::TypeStorage>::Base::Base;
+
+public:
+  // Support LLVM isa/cast/dyn_cast to one of the possible types.
+  static bool classof(Type other) { return type_isa<Types...>(other); }
+};
+
+template <typename BaseTy, typename ParentType = firrtl::FIRRTLType, typename Storage = mlir::TypeStorage>
+class TypeAliasOr
+    : public ::mlir::Type::TypeBase<TypeAliasOr<BaseTy, ParentType>, ParentType,
+                                    Storage> {
+  using mlir::Type::TypeBase<TypeAliasOr<BaseTy, ParentType>, ParentType,
+                             Storage>::Base::Base;
+
+public:
+  // Support LLVM isa/cast/dyn_cast to BaseTy.
+  static bool classof(Type other) { return type_isa<BaseTy>(other); }
+
+  // Support C++ implicit conversions to BaseTy.
+  operator BaseTy() const { return type_cast<BaseTy>(*this); }
+
+  BaseTy get() const { return circt::firrtl::type_cast<BaseTy>(*this); }
+};
+
+template <typename BaseTy>
+using BaseTypeAliasOr =
+    TypeAliasOr<BaseTy, firrtl::FIRRTLBaseType, detail::FIRRTLBaseTypeStorage>;
+
+using FIRRTLValue = mlir::TypedValue<FIRRTLType>;
+using FIRRTLBaseValue = mlir::TypedValue<BaseTypeAliasOr<firrtl::FIRRTLBaseType>>;
+} // namespace firrtl
+} // namespace circt
 
 #endif // CIRCT_DIALECT_FIRRTL_TYPES_H

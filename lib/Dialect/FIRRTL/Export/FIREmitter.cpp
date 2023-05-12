@@ -694,7 +694,7 @@ void Emitter::emitExpression(SpecialConstantOp op) {
 void Emitter::emitExpression(SubfieldOp op) {
   auto type = op.getInput().getType();
   emitExpression(op.getInput());
-  os << "." << type.getElementName(op.getFieldIndex());
+  os << "." << type.get().getElementName(op.getFieldIndex());
 }
 
 // NOLINTNEXTLINE(misc-no-recursion)

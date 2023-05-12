@@ -151,7 +151,7 @@ struct FlattenMemoryPass : public FlattenMemoryBase<FlattenMemoryPass> {
           } else {
             // Cast the input aggregate write data to flat type.
             // Cast the input aggregate write data to flat type.
-            auto newFieldType = newField.getType();
+            auto newFieldType = newField.getType().get();
             auto oldFieldBitWidth = getBitWidth(oldField.getType());
             // Following condition is true, if a data field is 0 bits. Then
             // newFieldType is of smaller bits than old.
