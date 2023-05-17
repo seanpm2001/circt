@@ -50,6 +50,9 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
   void rewriteModuleBody(FModuleOp module);
   void eraseEmptyModule(FModuleOp module);
   void forwardConstantOutputPort(FModuleOp module);
+  bool isLiveInnerSymbol(StringAttr module, StringAttr symbol) {
+    return liveInnerSymbols.count({module, symbol});
+  }
 
   void markAlive(InstanceOp instance) {
     markBlockUndeletable(instance->getBlock());
@@ -59,7 +62,7 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
   void markAlive(Value value) {
     //  If the value is already in `liveSet`, skip it.
     if (liveValues.insert(value).second)
-      worklist.push_back(value);
+      valueWorklist.push_back(value);
   }
 
   /// Return true if the value is known alive.
@@ -82,6 +85,19 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
 
   void visitUser(Operation *op);
   void visitValue(Value value);
+  void visitInnerSym() {}
+
+  void visitInnerSymUser() {}
+
+  bool isValidPortNonLocalAnnotation(StringAttr lastModule,
+                                     StringAttr lastInstance) {
+    // Check whether {lastModule, lastInstance} is alive.
+  }
+
+  void visitHierPathOp(hw::HierPathOp hierPathOp) {
+    // If hier path is alive, then put every inner symbols to alive.
+  }
+
   void visitConnect(FConnectLike connect);
   void visitSubelement(Operation *op);
   void markBlockExecutable(Block *block);
@@ -103,11 +119,18 @@ private:
       resultPortToInstanceResultMapping;
   InstanceGraph *instanceGraph;
 
-  /// A worklist of values whose liveness recently changed, indicating the
-  /// users need to be reprocessed.
-  SmallVector<Value, 64> worklist;
+  /// A valueWorklist of values whose liveness recently changed, indicating
+  /// the users need to be reprocessed.
+  SmallVector<Value, 64> valueWorklist;
+  SmallVector<std::pair<StringAttr, StringAttr>, 32> innerSymbolWorklist;
+  SmallVector<StringAttr, 32> symbolWorklist;
+
   llvm::DenseSet<Value> liveValues;
   llvm::DenseSet<InstanceOp> liveInstances;
+  llvm::DenseSet<std::pair<StringAttr, StringAttr>> liveInnerSymbols;
+  llvm::DenseSet<StringAttr> liveSymbols;
+  // liveSymbols -> liveInnerSymbols (e.g. HierPath)
+  // liveInnerSymobls -> instances, wire, ...
 
   /// The set of modules that cannot be removed for several reasons (side
   /// effects, ports/decls have don't touch).
@@ -171,8 +194,18 @@ void IMDeadCodeElimPass::markInstanceOp(InstanceOp instance) {
   // Otherwise this is a defined module.
   auto fModule = cast<FModuleOp>(op);
   markBlockExecutable(fModule.getBodyBlock());
-  if (isBlockUndeletable(fModule.getBodyBlock()) || instance.getInnerSym())
+
+  if (isBlockUndeletable(fModule.getBodyBlock()))
     markAlive(instance);
+
+  if (instance.getInnerSym()) {
+    // instance becomes live when.
+    // Check that this is valid
+    auto moduleName = fModule.getModuleNameAttr();
+    auto sym = instance.getInnerSym();
+    if (isLiveInnerSymbol(moduleName, sym))
+      markAlive(instance);
+  }
 
   // Ok, it is a normal internal module reference so populate
   // resultPortToInstanceResultMapping.
@@ -261,6 +294,7 @@ void IMDeadCodeElimPass::runOnOperation() {
                           << "\n");
   auto circuit = getOperation();
   instanceGraph = &getAnalysis<InstanceGraph>();
+  circuit.walk(); // accumulate hier path.
 
   // Create a vector of modules in the post order of instance graph.
   // FIXME: We copy the list of modules into a vector first to avoid iterator
@@ -285,10 +319,17 @@ void IMDeadCodeElimPass::runOnOperation() {
     }
   }
 
-  // If a value changed liveness then propagate liveness through its users and
-  // definition.
-  while (!worklist.empty())
-    visitValue(worklist.pop_back_val());
+  while (!valueWorklist.empty() || !symbolWorklist.empty() ||
+         !innerSymbolWorklist.empty()) {
+    // If a value changed liveness then propagate liveness through its users and
+    // definition.
+    while (!valueWorklist.empty())
+      visitValue(valueWorklist.pop_back_val());
+    while (!symbolWorklist)
+      visitSymbol(symbolWorklist.pop_back_val());
+    while (!symbolWorklist)
+      visitInnerSymbol(innerSymbolWorklist.pop_back_val());
+  }
 
   // Rewrite module signatures.
   for (auto module : circuit.getBodyBlock()->getOps<FModuleOp>())
