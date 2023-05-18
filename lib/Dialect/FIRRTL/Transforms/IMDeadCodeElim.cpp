@@ -330,26 +330,46 @@ void IMDeadCodeElimPass::runOnOperation() {
   symbolTable = &theSymbolTable;
   innerRefNamespace = &theInnerRefNamespace;
 
-  for (auto hierPath : circuit.getOps<hw::HierPathOp>()) {
-    auto namePath = hierPath.getNamepath().getValue();
-    // If the hierpath is public or ill-formed, the verifier should have caught
-    // the error. Conservatively mark the symbol as alive.
-    if (hierPath.isPublic() || namePath.size() <= 1 ||
-        namePath.back().isa<hw::InnerRefAttr>()) {
-      markAlive(hierPath);
-      continue;
+  // Walk attributes and find unknown uses of inner sym or hierpath.
+  circuit.walk([&](Operation *op) {
+    if (isa<FModuleOp>(op)) // Port or module annoations are ok.
+      return;
+
+    if (auto hierPath = dyn_cast<hw::HierPathOp>(op)) {
+      auto namePath = hierPath.getNamepath().getValue();
+      // If the hierpath is public or ill-formed, the verifier should have
+      // caught the error. Conservatively mark the symbol as alive.
+      if (hierPath.isPublic() || namePath.size() <= 1 ||
+          namePath.back().isa<hw::InnerRefAttr>()) {
+        markAlive(hierPath);
+        return;
+      }
+
+      auto instanceAttr = namePath.drop_back().back().cast<hw::InnerRefAttr>();
+      instanceToHierpath[{instanceAttr.getModule(), instanceAttr.getName()}]
+          .push_back(hierPath);
+      return;
     }
 
-    auto instanceAttr = namePath.drop_back().back().cast<hw::InnerRefAttr>();
-    auto instanceOp =
-        cast<firrtl::InstanceOp>(innerRefNamespace->lookupOp(instanceAttr));
-    instanceToHierpath[{instanceAttr.getModule(), instanceAttr.getName()}]
-        .push_back(hierPath);
-  }
-
-  // Walk inner symbol uses.
-  // Walk inner symbol uses.
-  // Walk annotations.
+    // If there is an unknown use of inner sym or hierpath, just mark all of
+    // them alive.
+    for (NamedAttribute namedAttr : op->getAttrs()) {
+      namedAttr.getValue().walk([&](Attribute subAttr) {
+        if (auto innerRef = dyn_cast<hw::InnerRefAttr>(subAttr)) {
+          if (auto instance = dyn_cast_or_null<firrtl::InstanceOp>(
+                  innerRefNamespace->lookupOp(innerRef))) {
+            markAlive(instance);
+          }
+        }
+        if (auto flatSymbolRefAttr = dyn_cast<FlatSymbolRefAttr>(subAttr)) {
+          if (auto hierPath = symbolTable->template lookup<hw::HierPathOp>(
+                  flatSymbolRefAttr.getAttr())) {
+            markAlive(hierPath);
+          }
+        }
+      });
+    }
+  });
 
   // Create a vector of modules in the post order of instance graph.
   // FIXME: We copy the list of modules into a vector first to avoid iterator
@@ -629,8 +649,8 @@ void IMDeadCodeElimPass::rewriteModuleSignature(FModuleOp module) {
       if (argument.getType().isa<RefType>())
         continue;
 
-      // Ok, this port is used only within its defined module. So we can replace
-      // the port with a wire.
+      // Ok, this port is used only within its defined module. So we can
+      // replace the port with a wire.
       auto wire = builder.create<WireOp>(argument.getType()).getResult();
 
       // Since `liveSet` contains the port, we have to erase it from the set.
