@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PassDetails.h"
+#include "circt/Dialect/FIRRTL/AnnotationDetails.h"
 #include "circt/Dialect/FIRRTL/FIRRTLInstanceGraph.h"
 #include "circt/Dialect/FIRRTL/Passes.h"
 #include "circt/Dialect/HW/InnerSymbolTable.h"
@@ -35,12 +36,33 @@ static bool isDeclaration(Operation *op) {
   return isa<WireOp, RegResetOp, RegOp, NodeOp, MemOp>(op);
 }
 
+bool hasDontTouchAnnotation(Value value) {
+  if (auto *op = value.getDefiningOp())
+    return AnnotationSet(op).hasDontTouch();
+  auto arg = value.dyn_cast<mlir::BlockArgument>();
+  auto module = cast<FModuleOp>(arg.getOwner()->getParentOp());
+  return AnnotationSet::forPort(module, arg.getArgNumber()).hasDontTouch();
+}
+
+static bool isDiscardableAnnotation(Annotation anno) {
+  return anno.isClass(omirTrackerAnnoClass);
+}
+
 /// Return true if this is a wire or register we're allowed to delete.
 static bool isDeletableDeclaration(Operation *op) {
   if (auto name = dyn_cast<FNamableOp>(op))
     if (!name.hasDroppableName())
       return false;
   return !hasDontTouch(op);
+}
+
+static bool isLastInstance(hw::HierPathOp op, InstanceOp instance) {
+  auto path = op.getNamepathAttr().getValue();
+  if (path.size() <= 1 || path.back().isa<hw::InnerRefAttr>())
+    return false;
+
+  return path.drop_back().back().cast<hw::InnerRefAttr>().getName() ==
+         firrtl::getInnerSymName(instance);
 }
 
 namespace {
@@ -53,6 +75,28 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
   void forwardConstantOutputPort(FModuleOp module);
   void markAlive(InstanceOp instance);
   void markAlive(hw::HierPathOp hierPathOp);
+  void markAlive(Annotation anno, InstanceOp instance,
+                 bool skipDiscardableAnnotation) {
+
+    if (skipDiscardableAnnotation && isDiscardableAnnotation(anno))
+      return;
+    auto hierPathSym = anno.getMember<FlatSymbolRefAttr>("circt.nonlocal");
+    if (!hierPathSym)
+      return;
+    auto op =
+        symbolTable->template lookup<hw::HierPathOp>(hierPathSym.getAttr());
+    if (!instance || isLastInstance(op, instance))
+      markAlive(op);
+  }
+
+  void markAlive(AnnotationSet annos, InstanceOp instance = {},
+                 bool skipDiscardableAnnotation = true) {
+    // If the annotation is not discardable, we already marked the hierpath
+    // in the preprocess.
+    for (auto anno : annos)
+      markAlive(anno, instance, skipDiscardableAnnotation);
+  }
+
   void markAlive(Value value) {
     //  If the value is already in `liveSet`, skip it.
     if (!liveValues.insert(value).second)
@@ -98,7 +142,7 @@ private:
 
   /// This keeps track of users the instance results that correspond to output
   /// ports.
-  DenseMap<BlockArgument, llvm::TinyPtrVector<Value>>
+  DenseMap<BlockArgument, llvm::TinyPtrVector<mlir::OpResult>>
       resultPortToInstanceResultMapping;
   InstanceGraph *instanceGraph;
 
@@ -121,7 +165,7 @@ private:
 
   /// This keeps track of input ports that need to be kept if the associated
   /// instance is alive.
-  DenseMap<InstanceOp, SmallVector<Value>> lazyLiveInputPorts;
+  DenseMap<InstanceOp, SmallVector<mlir::OpResult>> lazyLiveInputPorts;
 
   /// A cache for a (inner)symbol lookp.
   circt::hw::InnerRefNamespace *innerRefNamespace;
@@ -146,15 +190,21 @@ void IMDeadCodeElimPass::markAlive(hw::HierPathOp hierPathOp) {
 void IMDeadCodeElimPass::markAlive(InstanceOp instance) {
   if (!liveInstances.insert(instance).second)
     return;
+
   markBlockUndeletable(instance->getBlock());
-  if (instance.getInnerSym()) {
-    for (auto hierPathOp : instanceToHierpath[instance.getInnerRef()])
-      markAlive(hierPathOp);
-  }
-  // If the output port is alive, mark the instnace as alive. Propagate the
-  // liveness of input ports accumulated so far.
-  for (auto inputPort : lazyLiveInputPorts[instance])
+
+  // Input ports get alive only when the instance is considered as alive.
+  // Propagate the liveness of input ports accumulated so far.
+  auto module =
+      dyn_cast<FModuleOp>(*instanceGraph->getReferencedModule(instance));
+  if (module)
+    markAlive(AnnotationSet(module), instance, false);
+  for (auto inputPort : lazyLiveInputPorts[instance]) {
     markAlive(inputPort);
+    if (module)
+      markAlive(AnnotationSet::forPort(module, inputPort.getResultNumber()),
+                instance, false);
+  }
 }
 
 void IMDeadCodeElimPass::markDeclaration(Operation *op) {
@@ -216,7 +266,7 @@ void IMDeadCodeElimPass::markInstanceOp(InstanceOp instance) {
   // Ok, it is a normal internal module reference so populate
   // resultPortToInstanceResultMapping.
   for (auto resultNo : llvm::seq(0u, instance.getNumResults())) {
-    auto instancePortVal = instance.getResult(resultNo);
+    auto instancePortVal = instance.getResult(resultNo).cast<mlir::OpResult>();
 
     // Otherwise we have a result from the instance.  We need to forward results
     // from the body to this instance result's SSA value, so remember it.
@@ -231,7 +281,7 @@ void IMDeadCodeElimPass::markBlockExecutable(Block *block) {
     return; // Already executable.
 
   auto fmodule = cast<FModuleOp>(block->getParentOp());
-  if (fmodule.isPublic() || !fmodule.getAnnotationsAttr().empty())
+  if (fmodule.isPublic())
     markBlockUndeletable(block);
 
   // Mark ports with don't touch as alive.
@@ -435,9 +485,11 @@ void IMDeadCodeElimPass::visitValue(Value value) {
       for (auto userOfResultPort :
            resultPortToInstanceResultMapping[blockArg]) {
         auto instance = userOfResultPort.getDefiningOp<InstanceOp>();
-        if (liveInstances.contains(instance))
+        if (liveInstances.contains(instance)) {
+          markAlive(AnnotationSet::forPort(module, blockArg.getArgNumber()),
+                    instance, false);
           markAlive(userOfResultPort);
-        else
+        } else
           lazyLiveInputPorts[instance].push_back(userOfResultPort);
       }
     }
@@ -458,6 +510,12 @@ void IMDeadCodeElimPass::visitValue(Value value) {
       return;
 
     markAlive(instance);
+
+    if (instance.getInnerSym()) {
+      markAlive(
+          AnnotationSet::forPort(module, instanceResult.getResultNumber()),
+          instance, false);
+    }
 
     BlockArgument modulePortVal =
         module.getArgument(instanceResult.getResultNumber());
