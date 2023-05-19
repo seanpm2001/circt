@@ -128,7 +128,15 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
   void visitConnect(FConnectLike connect);
   void visitSubelement(Operation *op);
   void markBlockExecutable(Block *block);
-  void markBlockUndeletable(Block *block) { undeletableBlocks.insert(block); }
+  void markBlockUndeletable(Block *block) {
+    markAlive(block->getParentOp()->getParentOfType<FModuleOp>());
+  }
+  void markAlive(FModuleOp module) {
+    if (!undeletableBlocks.insert(module.getBodyBlock()).second)
+      return;
+    markAlive(AnnotationSet(module), {}, false);
+  }
+
   bool isBlockUndeletable(Block *block) const {
     return undeletableBlocks.contains(block);
   }
@@ -155,10 +163,6 @@ private:
   llvm::DenseSet<InstanceOp> liveInstances;
   llvm::DenseSet<hw::HierPathOp> liveHierPathOp;
 
-  /// A map from an instance to hierpaths whose last element is the key
-  /// instance.
-  DenseMap<hw::InnerRefAttr, SmallVector<hw::HierPathOp>> instanceToHierpath;
-
   /// The set of modules that cannot be removed for several reasons (side
   /// effects, ports/decls have don't touch).
   DenseSet<Block *> undeletableBlocks;
@@ -178,7 +182,7 @@ void IMDeadCodeElimPass::markAlive(hw::HierPathOp hierPathOp) {
     return;
   for (auto path : hierPathOp.getNamepathAttr())
     if (auto innerRef = path.dyn_cast<hw::InnerRefAttr>()) {
-      auto op = innerRefNamespace->lookupOp(innerRef);
+      auto *op = innerRefNamespace->lookupOp(innerRef);
       assert(op);
       if (auto instance = dyn_cast<InstanceOp>(op))
         // Mark the instance alive.
@@ -376,13 +380,8 @@ void IMDeadCodeElimPass::runOnOperation() {
       // If the hierpath is public or ill-formed, the verifier should have
       // caught the error. Conservatively mark the symbol as alive.
       if (hierPath.isPublic() || namePath.size() <= 1 ||
-          namePath.back().isa<hw::InnerRefAttr>()) {
+          namePath.back().isa<hw::InnerRefAttr>())
         markAlive(hierPath);
-        return;
-      }
-
-      auto instanceAttr = namePath.drop_back().back().cast<hw::InnerRefAttr>();
-      instanceToHierpath[instanceAttr].push_back(hierPath);
       return;
     }
 
@@ -390,18 +389,15 @@ void IMDeadCodeElimPass::runOnOperation() {
     // them alive.
     for (NamedAttribute namedAttr : op->getAttrs()) {
       namedAttr.getValue().walk([&](Attribute subAttr) {
-        if (auto innerRef = dyn_cast<hw::InnerRefAttr>(subAttr)) {
+        if (auto innerRef = dyn_cast<hw::InnerRefAttr>(subAttr))
           if (auto instance = dyn_cast_or_null<firrtl::InstanceOp>(
-                  innerRefNamespace->lookupOp(innerRef))) {
+                  innerRefNamespace->lookupOp(innerRef)))
             markAlive(instance);
-          }
-        }
-        if (auto flatSymbolRefAttr = dyn_cast<FlatSymbolRefAttr>(subAttr)) {
+
+        if (auto flatSymbolRefAttr = dyn_cast<FlatSymbolRefAttr>(subAttr))
           if (auto hierPath = symbolTable->template lookup<hw::HierPathOp>(
-                  flatSymbolRefAttr.getAttr())) {
+                  flatSymbolRefAttr.getAttr()))
             markAlive(hierPath);
-          }
-        }
       });
     }
   });
@@ -426,6 +422,7 @@ void IMDeadCodeElimPass::runOnOperation() {
       markBlockExecutable(module.getBodyBlock());
       for (auto port : module.getBodyBlock()->getArguments())
         markAlive(port);
+    } else {
     }
   }
 
@@ -442,7 +439,10 @@ void IMDeadCodeElimPass::runOnOperation() {
         return false;
       auto op =
           symbolTable->template lookup<hw::HierPathOp>(hierPathSym.getAttr());
-      return !liveHierPathOp.count(op);
+      if (liveHierPathOp.count(op))
+        return false;
+      assert(isDiscardableAnnotation(anno));
+      return true;
     };
     AnnotationSet::removePortAnnotations(module, filter);
     AnnotationSet::removeAnnotations(
@@ -692,8 +692,8 @@ void IMDeadCodeElimPass::rewriteModuleSignature(FModuleOp module) {
       if (argument.getType().isa<RefType>())
         continue;
 
-      // Ok, this port is used only within its defined module. So we can
-      // replace the port with a wire.
+      // Ok, this port is used only within its defined module. So we can replace
+      // the port with a wire.
       auto wire = builder.create<WireOp>(argument.getType()).getResult();
 
       // Since `liveSet` contains the port, we have to erase it from the set.
