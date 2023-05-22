@@ -56,6 +56,19 @@ static bool isDeletableDeclaration(Operation *op) {
   return !hasDontTouch(op);
 }
 
+static bool hasNonDiscardableAnnotation(FModuleOp module) {
+  bool exist = false;
+  auto pred = [&](unsigned _, Annotation anno) {
+    if (!isDiscardableAnnotation(anno))
+      exist = true;
+    return false;
+  };
+  AnnotationSet::removeAnnotations(module,
+                                   std::bind(pred, 0, std::placeholders::_1));
+  AnnotationSet::removePortAnnotations(module, pred);
+  return exist;
+}
+
 static bool isLastInstance(hw::HierPathOp op, InstanceOp instance) {
   auto path = op.getNamepathAttr().getValue();
   if (path.size() <= 1 || path.back().isa<hw::InnerRefAttr>())
@@ -128,13 +141,15 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
   void visitConnect(FConnectLike connect);
   void visitSubelement(Operation *op);
   void markBlockExecutable(Block *block);
-  void markBlockUndeletable(Block *block) {
-    markAlive(block->getParentOp()->getParentOfType<FModuleOp>());
+  void markBlockUndeletable(Operation *op) {
+    markAlive(op->getParentOfType<FModuleOp>());
   }
   void markAlive(FModuleOp module) {
+    assert(module.getBodyBlock());
     if (!undeletableBlocks.insert(module.getBodyBlock()).second)
       return;
     markAlive(AnnotationSet(module), {}, false);
+    valueWorklist.push_back(module);
   }
 
   bool isBlockUndeletable(Block *block) const {
@@ -156,7 +171,7 @@ private:
 
   /// A worklist of values whose liveness recently changed, indicating
   /// the users need to be reprocessed.
-  SmallVector<Value, 64> valueWorklist;
+  SmallVector<std::variant<Value, FModuleOp>, 64> valueWorklist;
   llvm::DenseSet<Value> liveValues;
 
   /// These keep track of liveness of instances and hierachical paths.
@@ -195,7 +210,7 @@ void IMDeadCodeElimPass::markAlive(InstanceOp instance) {
   if (!liveInstances.insert(instance).second)
     return;
 
-  markBlockUndeletable(instance->getBlock());
+  markBlockUndeletable(instance);
 
   // Input ports get alive only when the instance is considered as alive.
   // Propagate the liveness of input ports accumulated so far.
@@ -216,7 +231,7 @@ void IMDeadCodeElimPass::markDeclaration(Operation *op) {
   if (!isDeletableDeclaration(op)) {
     for (auto result : op->getResults())
       markAlive(result);
-    markBlockUndeletable(op->getBlock());
+    markBlockUndeletable(op);
   }
 }
 
@@ -227,7 +242,7 @@ void IMDeadCodeElimPass::markUnknownSideEffectOp(Operation *op) {
     markAlive(result);
   for (auto operand : op->getOperands())
     markAlive(operand);
-  markBlockUndeletable(op->getBlock());
+  markBlockUndeletable(op);
 }
 
 void IMDeadCodeElimPass::visitUser(Operation *op) {
@@ -286,13 +301,13 @@ void IMDeadCodeElimPass::markBlockExecutable(Block *block) {
 
   auto fmodule = cast<FModuleOp>(block->getParentOp());
   if (fmodule.isPublic())
-    markBlockUndeletable(block);
+    markAlive(fmodule);
 
   // Mark ports with don't touch as alive.
   for (auto blockArg : block->getArguments())
     if (hasDontTouch(blockArg)) {
       markAlive(blockArg);
-      markBlockUndeletable(block);
+      markAlive(fmodule);
     }
 
   for (auto &op : *block) {
@@ -422,14 +437,28 @@ void IMDeadCodeElimPass::runOnOperation() {
       markBlockExecutable(module.getBodyBlock());
       for (auto port : module.getBodyBlock()->getArguments())
         markAlive(port);
-    } else {
+    }
+    if (hasNonDiscardableAnnotation(module)) {
+      markBlockExecutable(module.getBodyBlock());
+      markAlive(module);
     }
   }
 
   // If a value changed liveness then propagate liveness through its users and
   // definition.
-  while (!valueWorklist.empty())
-    visitValue(valueWorklist.pop_back_val());
+  while (!valueWorklist.empty()) {
+    auto v = valueWorklist.pop_back_val();
+    if (auto *module = std::get_if<FModuleOp>(&v)) {
+      auto *node = instanceGraph->lookup(*module);
+      // First, delete dead instances.
+      for (auto *use : llvm::make_early_inc_range(node->uses())) {
+        auto instance = cast<InstanceOp>(*use->getInstance());
+        markAlive(instance);
+      }
+    } else {
+      visitValue(std::get<Value>(v));
+    }
+  }
 
   // Clean up annotations.
   for (auto module : circuit.getBodyBlock()->getOps<FModuleOp>()) {
