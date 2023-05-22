@@ -36,31 +36,12 @@ static bool isDeclaration(Operation *op) {
   return isa<WireOp, RegResetOp, RegOp, NodeOp, MemOp>(op);
 }
 
-/// Return true if the annotation is discardable.
-static bool isDiscardableAnnotation(Annotation anno) {
-  auto discardable = anno.getMember<UnitAttr>("circt.discardable");
-  return !!discardable;
-}
-
 /// Return true if this is a wire or register we're allowed to delete.
 static bool isDeletableDeclaration(Operation *op) {
   if (auto name = dyn_cast<FNamableOp>(op))
     if (!name.hasDroppableName())
       return false;
   return !hasDontTouch(op);
-}
-
-static bool hasNonDiscardableAnnotation(FModuleOp module) {
-  bool exist = false;
-  auto pred = [&](unsigned _, Annotation anno) {
-    if (!isDiscardableAnnotation(anno))
-      exist = true;
-    return false;
-  };
-  AnnotationSet::removeAnnotations(module,
-                                   std::bind(pred, 0, std::placeholders::_1));
-  AnnotationSet::removePortAnnotations(module, pred);
-  return exist;
 }
 
 static bool isLastInstance(hw::HierPathOp op, InstanceOp instance) {
