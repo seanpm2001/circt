@@ -38,7 +38,8 @@ static bool isDeclaration(Operation *op) {
 
 /// Return true if the annotation is discardable.
 static bool isDiscardableAnnotation(Annotation anno) {
-  return anno.isClass(omirTrackerAnnoClass);
+  auto discardable = anno.getMember<UnitAttr>("circt.discardable");
+  return !!discardable;
 }
 
 /// Return true if this is a wire or register we're allowed to delete.
@@ -96,7 +97,7 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
   }
 
   void markAlive(AnnotationSet annos, InstanceOp instance = {},
-                 bool skipDiscardableAnnotation = false) {
+                 bool skipDiscardableAnnotation = true) {
     // If the annotation is not discardable, we already marked the hierpath
     // in the preprocess.
     for (auto anno : annos)
@@ -431,7 +432,26 @@ void IMDeadCodeElimPass::runOnOperation() {
       for (auto port : module.getBodyBlock()->getArguments())
         markAlive(port);
     }
-    if (hasNonDiscardableAnnotation(module)) {
+    bool alive = false;
+    auto filter = [&](int _, Annotation anno) {
+      if (isDiscardableAnnotation(anno))
+        return false;
+      auto hierPathSym = anno.getMember<FlatSymbolRefAttr>("circt.nonlocal");
+      if (!hierPathSym)
+        return false;
+      auto op =
+          symbolTable->template lookup<hw::HierPathOp>(hierPathSym.getAttr());
+
+      // llvm::dbgs() << op << " Alive\n"; 
+      markAlive(op);
+      alive = true;
+      return false;
+    };
+    AnnotationSet::removePortAnnotations(module, filter);
+    AnnotationSet::removeAnnotations(
+        module, std::bind(filter, 0, std::placeholders::_1));
+
+    if (alive) {
       markBlockExecutable(module.getBodyBlock());
       markAlive(module);
       for (auto *use : instanceGraph->lookup(module)->uses())
@@ -449,6 +469,8 @@ void IMDeadCodeElimPass::runOnOperation() {
   // Clean up annotations.
   for (auto module : circuit.getBodyBlock()->getOps<FModuleOp>()) {
     auto filter = [&](int _, Annotation anno) {
+      if (!isDiscardableAnnotation(anno))
+        return false;
       auto hierPathSym = anno.getMember<FlatSymbolRefAttr>("circt.nonlocal");
       if (!hierPathSym)
         return false;
