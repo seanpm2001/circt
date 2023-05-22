@@ -36,14 +36,7 @@ static bool isDeclaration(Operation *op) {
   return isa<WireOp, RegResetOp, RegOp, NodeOp, MemOp>(op);
 }
 
-bool hasDontTouchAnnotation(Value value) {
-  if (auto *op = value.getDefiningOp())
-    return AnnotationSet(op).hasDontTouch();
-  auto arg = value.dyn_cast<mlir::BlockArgument>();
-  auto module = cast<FModuleOp>(arg.getOwner()->getParentOp());
-  return AnnotationSet::forPort(module, arg.getArgNumber()).hasDontTouch();
-}
-
+/// Return true if the annotation is discardable.
 static bool isDiscardableAnnotation(Annotation anno) {
   return anno.isClass(omirTrackerAnnoClass);
 }
@@ -103,7 +96,7 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
   }
 
   void markAlive(AnnotationSet annos, InstanceOp instance = {},
-                 bool skipDiscardableAnnotation = true) {
+                 bool skipDiscardableAnnotation = false) {
     // If the annotation is not discardable, we already marked the hierpath
     // in the preprocess.
     for (auto anno : annos)
@@ -145,11 +138,9 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
     markAlive(op->getParentOfType<FModuleOp>());
   }
   void markAlive(FModuleOp module) {
-    assert(module.getBodyBlock());
     if (!undeletableBlocks.insert(module.getBodyBlock()).second)
       return;
     markAlive(AnnotationSet(module), {}, false);
-    valueWorklist.push_back(module);
   }
 
   bool isBlockUndeletable(Block *block) const {
@@ -171,7 +162,7 @@ private:
 
   /// A worklist of values whose liveness recently changed, indicating
   /// the users need to be reprocessed.
-  SmallVector<std::variant<Value, FModuleOp>, 64> valueWorklist;
+  SmallVector<Value, 64> valueWorklist;
   llvm::DenseSet<Value> liveValues;
 
   /// These keep track of liveness of instances and hierachical paths.
@@ -216,8 +207,10 @@ void IMDeadCodeElimPass::markAlive(InstanceOp instance) {
   // Propagate the liveness of input ports accumulated so far.
   auto module =
       dyn_cast<FModuleOp>(*instanceGraph->getReferencedModule(instance));
-  if (module)
+  if (module) {
+    markAlive(module);
     markAlive(AnnotationSet(module), instance, false);
+  }
   for (auto inputPort : lazyLiveInputPorts[instance]) {
     markAlive(inputPort);
     if (module)
@@ -441,6 +434,8 @@ void IMDeadCodeElimPass::runOnOperation() {
     if (hasNonDiscardableAnnotation(module)) {
       markBlockExecutable(module.getBodyBlock());
       markAlive(module);
+      for (auto *use : instanceGraph->lookup(module)->uses())
+        markAlive(cast<InstanceOp>(*use->getInstance()));
     }
   }
 
@@ -448,16 +443,7 @@ void IMDeadCodeElimPass::runOnOperation() {
   // definition.
   while (!valueWorklist.empty()) {
     auto v = valueWorklist.pop_back_val();
-    if (auto *module = std::get_if<FModuleOp>(&v)) {
-      auto *node = instanceGraph->lookup(*module);
-      // First, delete dead instances.
-      for (auto *use : llvm::make_early_inc_range(node->uses())) {
-        auto instance = cast<InstanceOp>(*use->getInstance());
-        markAlive(instance);
-      }
-    } else {
-      visitValue(std::get<Value>(v));
-    }
+    visitValue(v);
   }
 
   // Clean up annotations.
