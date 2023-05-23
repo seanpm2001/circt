@@ -64,27 +64,6 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
   void markModuleAndInstanceAlive(FModuleOp module) {
     markAlive(std::make_pair(module, true));
   }
-  void markAlive(Annotation anno, InstanceOp instance,
-                 bool skipDiscardableAnnotation) {
-
-    if (skipDiscardableAnnotation && isDiscardableAnnotation(anno))
-      return;
-    auto hierPathSym = anno.getMember<FlatSymbolRefAttr>("circt.nonlocal");
-    if (!hierPathSym)
-      return;
-    auto op =
-        symbolTable->template lookup<hw::HierPathOp>(hierPathSym.getAttr());
-    if (!instance || isLastInstance(op, instance))
-      markAlive(op);
-  }
-
-  void markAlive(AnnotationSet annos, InstanceOp instance = {},
-                 bool skipDiscardableAnnotation = true) {
-    // If the annotation is not discardable, we already marked the hierpath
-    // in the preprocess.
-    for (auto anno : annos)
-      markAlive(anno, instance, skipDiscardableAnnotation);
-  }
 
   /// Return true if the value is known alive.
   bool isKnownAlive(Value value) const {
@@ -176,14 +155,9 @@ void IMDeadCodeElimPass::visitInstanceOp(InstanceOp instance) {
   markAlive(std::make_pair(module, /*markInstaceAlive*/ false));
   for (auto hierPath : instanceToHierPaths[instance])
     markAlive(hierPath);
-  // markAlive(AnnotationSet(module), instance, false);
 
-  for (auto inputPort : lazyLiveInputPorts[instance]) {
+  for (auto inputPort : lazyLiveInputPorts[instance])
     markAlive(inputPort);
-    if (module)
-      markAlive(AnnotationSet::forPort(module, inputPort.getResultNumber()),
-                instance, false);
-  }
 }
 
 void IMDeadCodeElimPass::visitModuleOp(FModuleOp module,
@@ -192,8 +166,6 @@ void IMDeadCodeElimPass::visitModuleOp(FModuleOp module,
     for (auto *use : instanceGraph->lookup(module)->uses())
       markAlive(cast<InstanceOp>(*use->getInstance()));
   }
-
-  markAlive(AnnotationSet(module), {}, false);
 }
 
 void IMDeadCodeElimPass::visitHierPathOp(hw::HierPathOp hierPathOp) {
@@ -502,8 +474,6 @@ void IMDeadCodeElimPass::visitValue(Value value) {
            resultPortToInstanceResultMapping[blockArg]) {
         auto instance = userOfResultPort.getDefiningOp<InstanceOp>();
         if (liveElements.contains(instance)) {
-          markAlive(AnnotationSet::forPort(module, blockArg.getArgNumber()),
-                    instance, false);
           markAlive(userOfResultPort);
         } else
           lazyLiveInputPorts[instance].push_back(userOfResultPort);
@@ -526,12 +496,6 @@ void IMDeadCodeElimPass::visitValue(Value value) {
       return;
 
     markAlive(instance);
-
-    if (instance.getInnerSym()) {
-      markAlive(
-          AnnotationSet::forPort(module, instanceResult.getResultNumber()),
-          instance, false);
-    }
 
     BlockArgument modulePortVal =
         module.getArgument(instanceResult.getResultNumber());
