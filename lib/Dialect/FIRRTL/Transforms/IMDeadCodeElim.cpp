@@ -61,8 +61,9 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
   void rewriteModuleBody(FModuleOp module);
   void eraseEmptyModule(FModuleOp module);
   void forwardConstantOutputPort(FModuleOp module);
-  void markAlive(InstanceOp instance);
-  void markAlive(hw::HierPathOp hierPathOp);
+  void markModuleAndInstanceAlive(FModuleOp module) {
+    markAlive(std::make_pair(module, true));
+  }
   void markAlive(Annotation anno, InstanceOp instance,
                  bool skipDiscardableAnnotation) {
 
@@ -85,17 +86,10 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
       markAlive(anno, instance, skipDiscardableAnnotation);
   }
 
-  void markAlive(Value value) {
-    //  If the value is already in `liveSet`, skip it.
-    if (!liveValues.insert(value).second)
-      return;
-    valueWorklist.push_back(value);
-  }
-
   /// Return true if the value is known alive.
   bool isKnownAlive(Value value) const {
     assert(value && "null should not be used");
-    return liveValues.count(value);
+    return liveElements.count(value);
   }
 
   /// Return true if the value is assumed dead.
@@ -117,20 +111,15 @@ struct IMDeadCodeElimPass : public IMDeadCodeElimBase<IMDeadCodeElimPass> {
   void visitSubelement(Operation *op);
   void markBlockExecutable(Block *block);
   void markBlockUndeletable(Operation *op) {
-    markAlive(op->getParentOfType<FModuleOp>());
-  }
-  void markAlive(FModuleOp module) {
-    if (!undeletableBlocks.insert(module.getBodyBlock()).second)
-      return;
-    markAlive(AnnotationSet(module), {}, false);
+    markModuleAndInstanceAlive(op->getParentOfType<FModuleOp>());
   }
 
-  bool isBlockUndeletable(Block *block) const {
-    return undeletableBlocks.contains(block);
-  }
   void markDeclaration(Operation *op);
   void markInstanceOp(InstanceOp instanceOp);
   void markUnknownSideEffectOp(Operation *op);
+  void visitInstanceOp(InstanceOp instance);
+  void visitHierPathOp(hw::HierPathOp hierpath);
+  void visitModuleOp(FModuleOp module, bool markInstancesAlive);
 
 private:
   /// The set of blocks that are known to execute, or are intrinsically alive.
@@ -142,22 +131,29 @@ private:
       resultPortToInstanceResultMapping;
   InstanceGraph *instanceGraph;
 
+  using ElementType = std::variant<Value, std::pair<FModuleOp, char>,
+                                   InstanceOp, hw::HierPathOp>;
+
+  void markAlive(ElementType element) {
+    if (!liveElements.insert(element).second)
+      return;
+    worklist.push_back(element);
+  }
   /// A worklist of values whose liveness recently changed, indicating
   /// the users need to be reprocessed.
-  SmallVector<Value, 64> valueWorklist;
-  llvm::DenseSet<Value> liveValues;
-
-  /// These keep track of liveness of instances and hierachical paths.
-  llvm::DenseSet<InstanceOp> liveInstances;
-  llvm::DenseSet<hw::HierPathOp> liveHierPathOp;
+  SmallVector<ElementType, 64> worklist;
+  llvm::DenseSet<ElementType> liveElements;
 
   /// The set of modules that cannot be removed for several reasons (side
   /// effects, ports/decls have don't touch).
-  DenseSet<Block *> undeletableBlocks;
+  DenseSet<Block *> liveModuleDeclaration;
 
   /// This keeps track of input ports that need to be kept if the associated
   /// instance is alive.
   DenseMap<InstanceOp, SmallVector<mlir::OpResult>> lazyLiveInputPorts;
+
+  DenseMap<InstanceOp, SmallVector<hw::HierPathOp>> instanceToHierPaths;
+  DenseMap<hw::HierPathOp, SetVector<ElementType>> hierPathsToElements;
 
   /// A cache for a (inner)symbol lookp.
   circt::hw::InnerRefNamespace *innerRefNamespace;
@@ -165,23 +161,7 @@ private:
 };
 } // namespace
 
-void IMDeadCodeElimPass::markAlive(hw::HierPathOp hierPathOp) {
-  if (!liveHierPathOp.insert(hierPathOp).second)
-    return;
-  for (auto path : hierPathOp.getNamepathAttr())
-    if (auto innerRef = path.dyn_cast<hw::InnerRefAttr>()) {
-      auto *op = innerRefNamespace->lookupOp(innerRef);
-      assert(op);
-      if (auto instance = dyn_cast<InstanceOp>(op))
-        // Mark the instance alive.
-        markAlive(instance);
-      // Otherwise, inner symbols are already marked alive.
-    }
-}
-
-void IMDeadCodeElimPass::markAlive(InstanceOp instance) {
-  if (!liveInstances.insert(instance).second)
-    return;
+void IMDeadCodeElimPass::visitInstanceOp(InstanceOp instance) {
 
   markBlockUndeletable(instance);
 
@@ -189,16 +169,43 @@ void IMDeadCodeElimPass::markAlive(InstanceOp instance) {
   // Propagate the liveness of input ports accumulated so far.
   auto module =
       dyn_cast<FModuleOp>(*instanceGraph->getReferencedModule(instance));
-  if (module) {
-    markAlive(module);
-    markAlive(AnnotationSet(module), instance, false);
-  }
+
+  if (!module)
+    return;
+
+  markAlive(std::make_pair(module, /*markInstaceAlive*/ false));
+  for (auto hierPath : instanceToHierPaths[instance])
+    markAlive(hierPath);
+  // markAlive(AnnotationSet(module), instance, false);
+
   for (auto inputPort : lazyLiveInputPorts[instance]) {
     markAlive(inputPort);
     if (module)
       markAlive(AnnotationSet::forPort(module, inputPort.getResultNumber()),
                 instance, false);
   }
+}
+
+void IMDeadCodeElimPass::visitModuleOp(FModuleOp module,
+                                       bool markInstanceAlive) {
+  if (markInstanceAlive) {
+    for (auto *use : instanceGraph->lookup(module)->uses())
+      markAlive(cast<InstanceOp>(*use->getInstance()));
+  }
+
+  markAlive(AnnotationSet(module), {}, false);
+}
+
+void IMDeadCodeElimPass::visitHierPathOp(hw::HierPathOp hierPathOp) {
+  for (auto path : hierPathOp.getNamepathAttr())
+    if (auto innerRef = path.dyn_cast<hw::InnerRefAttr>()) {
+      auto *op = innerRefNamespace->lookupOp(innerRef);
+      if (auto instance = dyn_cast<InstanceOp>(op))
+        markAlive(instance);
+    }
+
+  for (auto elem : hierPathsToElements[hierPathOp])
+    markAlive(elem);
 }
 
 void IMDeadCodeElimPass::markDeclaration(Operation *op) {
@@ -254,9 +261,6 @@ void IMDeadCodeElimPass::markInstanceOp(InstanceOp instance) {
   auto fModule = cast<FModuleOp>(op);
   markBlockExecutable(fModule.getBodyBlock());
 
-  if (isBlockUndeletable(fModule.getBodyBlock()))
-    markAlive(instance);
-
   // Ok, it is a normal internal module reference so populate
   // resultPortToInstanceResultMapping.
   for (auto resultNo : llvm::seq(0u, instance.getNumResults())) {
@@ -276,13 +280,13 @@ void IMDeadCodeElimPass::markBlockExecutable(Block *block) {
 
   auto fmodule = cast<FModuleOp>(block->getParentOp());
   if (fmodule.isPublic())
-    markAlive(fmodule);
+    markModuleAndInstanceAlive(fmodule);
 
   // Mark ports with don't touch as alive.
   for (auto blockArg : block->getArguments())
     if (hasDontTouch(blockArg)) {
       markAlive(blockArg);
-      markAlive(fmodule);
+      markModuleAndInstanceAlive(fmodule);
     }
 
   for (auto &op : *block) {
@@ -371,7 +375,12 @@ void IMDeadCodeElimPass::runOnOperation() {
       // caught the error. Conservatively mark the symbol as alive.
       if (hierPath.isPublic() || namePath.size() <= 1 ||
           namePath.back().isa<hw::InnerRefAttr>())
-        markAlive(hierPath);
+        return markAlive(hierPath);
+
+      if (auto instance =
+              dyn_cast_or_null<firrtl::InstanceOp>(innerRefNamespace->lookupOp(
+                  namePath.drop_back().back().cast<hw::InnerRefAttr>())))
+        instanceToHierPaths[instance].push_back(hierPath);
       return;
     }
 
@@ -413,63 +422,46 @@ void IMDeadCodeElimPass::runOnOperation() {
       for (auto port : module.getBodyBlock()->getArguments())
         markAlive(port);
     }
-    bool alive = false;
-    auto filter = [&](int _, Annotation anno) {
-      if (isDiscardableAnnotation(anno))
-        return false;
-      auto hierPathSym = anno.getMember<FlatSymbolRefAttr>("circt.nonlocal");
-      if (!hierPathSym)
-        return false;
-      auto op =
-          symbolTable->template lookup<hw::HierPathOp>(hierPathSym.getAttr());
 
-      // llvm::dbgs() << op << " Alive\n"; 
-      markAlive(op);
-      alive = true;
+    auto visitAnnotation = [&](int portId, Annotation anno) -> bool {
+      auto hierPathSym = anno.getMember<FlatSymbolRefAttr>("circt.nonlocal");
+      hw::HierPathOp hierPathOp;
+      if (hierPathSym)
+        hierPathOp =
+            symbolTable->template lookup<hw::HierPathOp>(hierPathSym.getAttr());
+
+      if (isDiscardableAnnotation(anno)) {
+        if (hierPathOp) {
+          if (portId < 0)
+            hierPathsToElements[hierPathOp].insert(
+                std::make_pair(module, false));
+          else
+            hierPathsToElements[hierPathOp].insert(module.getArgument(portId));
+        }
+        return false;
+      }
+      if (hierPathOp)
+        markAlive(hierPathOp);
+      markModuleAndInstanceAlive(module);
       return false;
     };
-    AnnotationSet::removePortAnnotations(module, filter);
+
+    AnnotationSet::removePortAnnotations(module, visitAnnotation);
     AnnotationSet::removeAnnotations(
-        module, std::bind(filter, 0, std::placeholders::_1));
-
-    if (alive) {
-      markBlockExecutable(module.getBodyBlock());
-      markAlive(module);
-      for (auto *use : instanceGraph->lookup(module)->uses())
-        markAlive(cast<InstanceOp>(*use->getInstance()));
-    }
+        module, std::bind(visitAnnotation, -1, std::placeholders::_1));
   }
 
-  // If a value changed liveness then propagate liveness through its users and
-  // definition.
-  while (!valueWorklist.empty()) {
-    auto v = valueWorklist.pop_back_val();
-    visitValue(v);
-  }
-
-  // Clean up annotations.
-  for (auto module : circuit.getBodyBlock()->getOps<FModuleOp>()) {
-    auto filter = [&](int _, Annotation anno) {
-      if (!isDiscardableAnnotation(anno))
-        return false;
-      auto hierPathSym = anno.getMember<FlatSymbolRefAttr>("circt.nonlocal");
-      if (!hierPathSym)
-        return false;
-      auto op =
-          symbolTable->template lookup<hw::HierPathOp>(hierPathSym.getAttr());
-      if (liveHierPathOp.count(op))
-        return false;
-      assert(isDiscardableAnnotation(anno));
-      return true;
-    };
-    AnnotationSet::removePortAnnotations(module, filter);
-    AnnotationSet::removeAnnotations(
-        module, std::bind(filter, 0, std::placeholders::_1));
-  }
-  for (auto op : llvm::make_early_inc_range(
-           circuit.getBodyBlock()->getOps<hw::HierPathOp>())) {
-    if (!liveHierPathOp.count(op))
-      op.erase();
+  // If an element changed liveness then propagate liveness through it.
+  while (!worklist.empty()) {
+    auto v = worklist.pop_back_val();
+    if (auto *value = std::get_if<Value>(&v))
+      visitValue(*value);
+    else if (auto *instance = std::get_if<InstanceOp>(&v))
+      visitInstanceOp(*instance);
+    else if (auto *hierpath = std::get_if<hw::HierPathOp>(&v))
+      visitHierPathOp(*hierpath);
+    else if (auto *modulePair = std::get_if<std::pair<FModuleOp, char>>(&v))
+      visitModuleOp(modulePair->first, modulePair->second);
   }
 
   // Rewrite module signatures.
@@ -480,6 +472,12 @@ void IMDeadCodeElimPass::runOnOperation() {
   mlir::parallelForEach(circuit.getContext(),
                         circuit.getBodyBlock()->getOps<FModuleOp>(),
                         [&](auto op) { rewriteModuleBody(op); });
+
+  // Clean up hierpaths.
+  for (auto op : llvm::make_early_inc_range(
+           circuit.getBodyBlock()->getOps<hw::HierPathOp>()))
+    if (!liveElements.count(op))
+      op.erase();
 
   for (auto module : modules)
     eraseEmptyModule(module);
@@ -503,7 +501,7 @@ void IMDeadCodeElimPass::visitValue(Value value) {
       for (auto userOfResultPort :
            resultPortToInstanceResultMapping[blockArg]) {
         auto instance = userOfResultPort.getDefiningOp<InstanceOp>();
-        if (liveInstances.contains(instance)) {
+        if (liveElements.contains(instance)) {
           markAlive(AnnotationSet::forPort(module, blockArg.getArgNumber()),
                     instance, false);
           markAlive(userOfResultPort);
@@ -570,6 +568,22 @@ void IMDeadCodeElimPass::rewriteModuleBody(FModuleOp module) {
   // TODO: Erase this module from circuit op.
   if (!isBlockExecutable(body))
     return;
+
+  auto removeDeadNonLocalAnnotations = [&](int _, Annotation anno) -> bool {
+    auto hierPathSym = anno.getMember<FlatSymbolRefAttr>("circt.nonlocal");
+    // We only clean up non-local annotations here as local annotations will
+    // be deleted afterwards.
+    if (!isDiscardableAnnotation(anno) || !hierPathSym)
+      return false;
+    auto hierPathOp =
+        symbolTable->template lookup<hw::HierPathOp>(hierPathSym.getAttr());
+    return !liveElements.count(hierPathOp);
+  };
+
+  AnnotationSet::removePortAnnotations(module, removeDeadNonLocalAnnotations);
+  AnnotationSet::removeAnnotations(
+      module,
+      std::bind(removeDeadNonLocalAnnotations, -1, std::placeholders::_1));
 
   // Walk the IR bottom-up when deleting operations.
   for (auto &op : llvm::make_early_inc_range(llvm::reverse(*body))) {
@@ -657,14 +671,14 @@ void IMDeadCodeElimPass::rewriteModuleSignature(FModuleOp module) {
     // If a module port is dead but its instance result is alive, the port
     // is used as a temporary wire so make sure that a replaced wire is
     // putted into `liveSet`.
-    liveValues.erase(result);
-    liveValues.insert(wire);
+    liveElements.erase(result);
+    liveElements.insert(wire);
   };
 
   // First, delete dead instances.
   for (auto *use : llvm::make_early_inc_range(instanceGraphNode->uses())) {
     auto instance = cast<InstanceOp>(*use->getInstance());
-    if (!liveInstances.count(instance)) {
+    if (!liveElements.count(instance)) {
       // Replace old instance results with dummy wires.
       ImplicitLocOpBuilder builder(instance.getLoc(), instance);
       for (auto index : llvm::seq(0u, instance.getNumResults()))
@@ -715,8 +729,8 @@ void IMDeadCodeElimPass::rewriteModuleSignature(FModuleOp module) {
       auto wire = builder.create<WireOp>(argument.getType()).getResult();
 
       // Since `liveSet` contains the port, we have to erase it from the set.
-      liveValues.erase(argument);
-      liveValues.insert(wire);
+      liveElements.erase(argument);
+      liveElements.insert(wire);
       argument.replaceAllUsesWith(wire);
       deadPortIndexes.set(index);
       continue;
@@ -741,14 +755,14 @@ void IMDeadCodeElimPass::rewriteModuleSignature(FModuleOp module) {
   // Erase arguments of the old module from liveSet to prevent from creating
   // dangling pointers.
   for (auto arg : module.getArguments())
-    liveValues.erase(arg);
+    liveElements.erase(arg);
 
   // Delete ports from the module.
   module.erasePorts(deadPortIndexes);
 
   // Add arguments of the new module to liveSet.
   for (auto arg : module.getArguments())
-    liveValues.insert(arg);
+    liveElements.insert(arg);
 
   // Rewrite all uses.
   for (auto *use : llvm::make_early_inc_range(instanceGraphNode->uses())) {
@@ -761,19 +775,19 @@ void IMDeadCodeElimPass::rewriteModuleSignature(FModuleOp module) {
     // Since we will rewrite instance op, it is necessary to remove old
     // instance results from liveSet.
     for (auto oldResult : instance.getResults())
-      liveValues.erase(oldResult);
+      liveElements.erase(oldResult);
 
     // Create a new instance op without dead ports.
     auto newInstance = instance.erasePorts(builder, deadPortIndexes);
 
     // Mark new results as alive.
     for (auto newResult : newInstance.getResults())
-      liveValues.insert(newResult);
+      liveElements.insert(newResult);
 
     instanceGraph->replaceInstance(instance, newInstance);
-    if (liveInstances.contains(instance)) {
-      liveInstances.erase(instance);
-      liveInstances.insert(newInstance);
+    if (liveElements.contains(instance)) {
+      liveElements.erase(instance);
+      liveElements.insert(newInstance);
     }
     // Remove old one.
     instance.erase();
