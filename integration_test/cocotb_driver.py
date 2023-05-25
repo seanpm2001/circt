@@ -3,7 +3,6 @@ import os
 import subprocess
 import sys
 import re
-from pathlib import Path
 from cocotb_test.simulator import run
 
 
