@@ -212,6 +212,7 @@ def FVectorImpl : BaseVectorTypeImpl<"FVector","::circt::firrtl::FIRRTLBaseType"
   let firrtlExtraClassDeclaration = [{
     /// Return this type with any flip types recursively removed from itself.
     FIRRTLBaseType getPassiveType();
+    FIRRTLBaseType getAnonymousType();
   }];
 }
 
@@ -317,6 +318,8 @@ class BaseBundleTypeImpl<string name, string ElementType, list<Trait> traits = [
     iterator begin() const { return getElements().begin(); }
     iterator end() const { return getElements().end(); }
 
+    FIRRTLBaseType getAnonymousType();
+
     /// Const support.
     bool isConst();
     ElementType getElementTypePreservingConst(size_t index);
@@ -335,6 +338,28 @@ def BundleImpl : BaseBundleTypeImpl<"Bundle","::circt::firrtl::FIRRTLBaseType", 
 }
 
 def OpenBundleImpl : BaseBundleTypeImpl<"OpenBundle","::circt::firrtl::FIRRTLType", [DeclareTypeInterfaceMethods<FieldIDTypeInterface>]>;
+
+def BaseTypeAliasImpl : FIRRTLImplType<"BaseTypeAlias", [], "::circt::firrtl::FIRRTLBaseType"> {
+  let summary = "type alias for firrtl base types";
+  let parameters =
+    (ins  "StringAttr":$name, TypeParameter<"::circt::firrtl::FIRRTLBaseType",
+                            "An inner type">:$innerType);
+  let storageClass = "BaseTypeAliasStorage";
+  let genAccessors = true;
+  let skipDefaultBuilders = true;
+  let extraClassDeclaration = [{
+      FIRRTLBaseType getAnonymousType();
+      FIRRTLBaseType getPassiveType();
+      /// Return the recursive properties of the type.
+      RecursiveTypeProperties getRecursiveTypeProperties() const;
+  }];
+
+  let builders = [
+    TypeBuilderWithInferredContext<(ins
+    "::mlir::StringAttr":$name,
+    "::circt::firrtl::FIRRTLBaseType":$innerType)>
+  ];
+}
 
 def FEnumImpl : FIRRTLImplType<"FEnum", [FieldIDTypeInterface]> {
   let summary = "a sum type of named elements.";
@@ -394,6 +419,8 @@ def FEnumImpl : FIRRTLImplType<"FEnum", [FieldIDTypeInterface]> {
     /// Look up an element type by index.
     FIRRTLBaseType getElementType(size_t index);
 
+    FIRRTLBaseType getAnonymousType();
+    
     /// Return the recursive properties of the type.
     RecursiveTypeProperties getRecursiveTypeProperties() const;
 
