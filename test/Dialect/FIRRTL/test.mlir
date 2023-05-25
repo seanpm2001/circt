@@ -248,4 +248,11 @@ firrtl.module @OpenAggTest(in %in: !firrtl.openbundle<a: bundle<data: uint<1>>, 
 firrtl.module @StringTest(in %in: !firrtl.property.string, out %out: !firrtl.property.string) {
   firrtl.connect %out, %in : !firrtl.property.string, !firrtl.property.string
 }
+
+// CHECK-LABEL: TypeAlias
+// CHECK-SAME: !firrtl.alias<foo, uint<1>>
+firrtl.module @TypeAlias(in %in: !firrtl.alias<foo, uint<1>>, out %out: !firrtl.alias<foo, uint<1>>) {
+  firrtl.strictconnect %out, %in: !firrtl.alias<foo, uint<1>>
+}
+
 }
