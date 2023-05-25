@@ -841,18 +841,6 @@ bool firrtl::areTypesEquivalent(FIRRTLType destFType, FIRRTLType srcFType,
   bool srcIsConst = srcOuterTypeIsConst || srcFType.isConst();
   bool destIsConst = destOuterTypeIsConst || destFType.isConst();
 
-  // Type constness must match for equivalence
-  if (destType.isConst() && !srcType.isConst() && !srcOuterTypeIsConst)
-    return false;
-
-  // Reset types can be driven by UInt<1>, AsyncReset, or Reset types.
-  if (firrtl::type_isa<ResetType>(destType))
-    return srcType.isResetType();
-
-  // Reset types can drive UInt<1>, AsyncReset, or Reset types.
-  if (firrtl::type_isa<ResetType>(srcType))
-    return destType.isResetType();
-
   // Vector types can be connected if they have the same size and element
   // type.
   auto destVectorType = firrtl::type_dyn_cast<FVectorType>(destType);
@@ -943,18 +931,6 @@ bool firrtl::areTypesWeaklyEquivalent(FIRRTLType destFType, FIRRTLType srcFType,
 
   bool srcIsConst = srcOuterTypeIsConst || srcFType.isConst();
   bool destIsConst = destOuterTypeIsConst || destFType.isConst();
-
-  // Type constness must match for equivalence
-  if (destType.isConst() && !srcType.isConst() && !srcOuterTypeIsConst)
-    return false;
-
-  // Reset types can be driven by UInt<1>, AsyncReset, or Reset types.
-  if (firrtl::type_isa<ResetType>(destType))
-    return srcType.isResetType();
-
-  // Reset types can drive UInt<1>, AsyncReset, or Reset types.
-  if (firrtl::type_isa<ResetType>(srcType))
-    return destType.isResetType();
 
   // Vector types can be connected if their element types are weakly
   // equivalent. Size doesn't matter.
