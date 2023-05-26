@@ -880,11 +880,7 @@ ParseResult FIRParser::parseType(FIRRTLType &result, const Twine &message) {
     break;
   }
 
-  case FIRToken::l_brace_bar:
-    if (parseEnumType(result))
-      return failure();
-
-  case FIRToken::identifier:
+  case FIRToken::identifier: {
     StringRef id;
     if (parseId(id, "expected a type alias name"))
       return failure();
@@ -892,6 +888,12 @@ ParseResult FIRParser::parseType(FIRRTLType &result, const Twine &message) {
     if (it == constants.aliasMap.end())
       return failure();
     result = it->second;
+    break;
+  }
+
+  case FIRToken::l_brace_bar:
+    if (parseEnumType(result))
+      return failure();
     break;
   }
 
