@@ -1284,7 +1284,7 @@ LogicalResult InferenceMapping::mapOperation(Operation *op) {
         // If the constant has a known width, use that. Otherwise pick the
         // smallest number of bits necessary to represent the constant.
         Expr *e;
-        if (auto width = op.getType().getWidth())
+        if (auto width = op.getType().get().getWidth())
           e = solver.known(*width);
         else {
           auto v = op.getValue();
@@ -1341,7 +1341,7 @@ LogicalResult InferenceMapping::mapOperation(Operation *op) {
 
       // Aggregate Values
       .Case<SubfieldOp>([&](auto op) {
-        auto bundleType = op.getInput().getType();
+        auto bundleType = op.getInput().getType().get();
         auto fieldID = bundleType.getFieldID(op.getFieldIndex());
         unifyTypes(FieldRef(op.getResult(), 0),
                    FieldRef(op.getInput(), fieldID), op.getType());
@@ -1353,7 +1353,7 @@ LogicalResult InferenceMapping::mapOperation(Operation *op) {
                    op.getType());
       })
       .Case<SubtagOp>([&](auto op) {
-        auto enumType = op.getInput().getType();
+        auto enumType = op.getInput().getType().get();
         auto fieldID = enumType.getFieldID(op.getFieldIndex());
         unifyTypes(FieldRef(op.getResult(), 0),
                    FieldRef(op.getInput(), fieldID), op.getType());
@@ -1386,7 +1386,7 @@ LogicalResult InferenceMapping::mapOperation(Operation *op) {
       .Case<DivPrimOp>([&](auto op) {
         auto lhs = getExpr(op.getLhs());
         Expr *e;
-        if (op.getType().isSigned()) {
+        if (op.getType().get().isSigned()) {
           e = solver.add(lhs, solver.known(1));
         } else {
           e = lhs;
@@ -1432,7 +1432,7 @@ LogicalResult InferenceMapping::mapOperation(Operation *op) {
       })
       .Case<CvtPrimOp>([&](auto op) {
         auto input = getExpr(op.getInput());
-        auto e = op.getInput().getType().isSigned()
+        auto e = op.getInput().getType().get().isSigned()
                      ? input
                      : solver.add(input, solver.known(1));
         setExpr(op.getResult(), e);
@@ -1673,19 +1673,19 @@ void InferenceMapping::declareVars(Value value, Location loc, bool isDerived) {
       else
         setExpr(field, solver.var());
       fieldID++;
-    } else if (auto bundleType = type.dyn_cast<BundleType>()) {
+    } else if (auto bundleType = firrtl::type_dyn_cast<BundleType>(type)) {
       // Bundle types recursively declare all bundle elements.
       fieldID++;
       for (auto &element : bundleType) {
         declare(element.type);
       }
-    } else if (auto vecType = type.dyn_cast<FVectorType>()) {
+    } else if (auto vecType = firrtl::type_dyn_cast<FVectorType>(type)) {
       fieldID++;
       auto save = fieldID;
       declare(vecType.getElementType());
       // Skip past the rest of the elements
       fieldID = save + vecType.getMaxFieldID();
-    } else if (auto enumType = type.dyn_cast<FEnumType>()) {
+    } else if (auto enumType = firrtl::type_dyn_cast<FEnumType>(type)) {
       fieldID++;
       for (auto &element : enumType.getElements())
         declare(element.type);
