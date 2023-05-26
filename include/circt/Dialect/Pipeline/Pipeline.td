@@ -33,7 +33,8 @@ def PipelineOp : Op<Pipeline_Dialect, "pipeline", [
     Pure,
     SingleBlockImplicitTerminator<"ReturnOp">,
     RegionKindInterface,
-    HasOnlyGraphRegion 
+    HasOnlyGraphRegion,
+    AttrSizedOperandSegments
   ]> {
   let summary = "pipeline operation";
   let description = [{
@@ -46,12 +47,19 @@ def PipelineOp : Op<Pipeline_Dialect, "pipeline", [
     (in the feedforward, statically scheduled case), used to control stalling
     (feedback, statically scheduled case) or in conjunction with handshake signals
     for dynamically scheduled pipelines.
+
     A pipelines' latency sensitivity is based on the I/O of the pipeline - if
     any in- or output port is an ESI channel, all ports are expected to be ESI
     channels, and the pipeline is considered latency sensitive.
     The internal representation of the pipeline is agnostic to the latency
     insensitivity of the I/O. This is by design - allowing us a single source
     of truth for lowering either latency sensitive or latency insensitive pipelines.
+
+    A `pipeline.pipeline` supports a `stall` input. This signal is intended to
+    connect to all stages within the pipeline, and is used to stall the entirety
+    of the pipeline. It is lowering defined how stages choose to use this signal,
+    although in the common case, a `stall` signal would typically connect to
+    the clock-enable input of the stage-separating registers.
 
     A typical flow would go like this:
 
@@ -102,14 +110,14 @@ def PipelineOp : Op<Pipeline_Dialect, "pipeline", [
   }];
 
   let arguments = (ins
-    Variadic<AnyType>:$inputs, I1:$clock, I1:$reset
+    Variadic<AnyType>:$inputs, I1:$clock, I1:$reset, Optional<I1>:$stall
   );
   let results = (outs Variadic<AnyType>:$results);
   let regions = (region SizedRegion<1>: $body);
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    `(` $inputs `)` `clock` $clock `reset` $reset attr-dict `:` functional-type($inputs, results) $body
+    `(` $inputs `)` (`stall` $stall^)? `clock` $clock `reset` $reset attr-dict `:` functional-type($inputs, results) $body
   }];
 
   let extraClassDeclaration = [{
