@@ -2379,7 +2379,8 @@ static LogicalResult checkConnectConditionality(FConnectLike connect) {
           .Case<SubfieldOp, SubindexOp>([&](auto op) { value = op.getInput(); })
           .Case<SubaccessOp>([&](SubaccessOp op) {
             if (op.getInput()
-                    .getType().get()
+                    .getType()
+                    .get()
                     .getElementTypePreservingConst()
                     .isConst())
               originalFieldType = originalFieldType.getConstType(true);
@@ -3159,7 +3160,7 @@ ParseResult parseSubfieldLikeOp(OpAsmParser &parser, OperationState &result) {
   if (parser.resolveOperand(input, inputType, result.operands))
     return failure();
 
-  auto bundleType = inputType.dyn_cast<typename OpTy::InputType>();
+  auto bundleType = type_dyn_cast<typename OpTy::InputType>(inputType);
   if (!bundleType)
     return parser.emitError(parser.getNameLoc(),
                             "input must be bundle type, got ")

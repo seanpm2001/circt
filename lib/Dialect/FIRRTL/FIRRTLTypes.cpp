@@ -602,6 +602,11 @@ FIRRTLBaseType FIRRTLBaseType::getAllConstDroppedType() {
             UIntType>([&](auto type) { return type.getConstType(false); })
       .Case<BundleType, FVectorType, FEnumType>(
           [&](auto type) { return type.getAllConstDroppedType(); })
+      .Case<BaseTypeAliasType>([&](BaseTypeAliasType type) {
+        return type.containsConst()
+                   ? type.getInnerType().getAllConstDroppedType()
+                   : type;
+      })
       .Default([](Type) {
         llvm_unreachable("unknown FIRRTL type");
         return FIRRTLBaseType();
@@ -1175,8 +1180,9 @@ struct circt::firrtl::detail::BundleTypeStorage
 
   BundleTypeStorage(ArrayRef<BundleType::BundleElement> elements, bool isConst)
       : detail::FIRRTLBaseTypeStorage(isConst),
-        elements(elements.begin(), elements.end()),
-        props{true, false, false, isConst, true, false, false} {
+        elements(elements.begin(), elements.end()), props{true,    false, false,
+                                                          isConst, true,  false,
+                                                          false} {
     uint64_t fieldID = 0;
     fieldIDs.reserve(elements.size());
     for (auto &element : elements) {
@@ -1428,8 +1434,9 @@ struct circt::firrtl::detail::OpenBundleTypeStorage : mlir::TypeStorage {
 
   OpenBundleTypeStorage(ArrayRef<OpenBundleType::BundleElement> elements,
                         bool isConst)
-      : elements(elements.begin(), elements.end()),
-        props{true, false, false, isConst, true, false, false},
+      : elements(elements.begin(), elements.end()), props{true,    false, false,
+                                                          isConst, true,  false,
+                                                          false},
         isConst(static_cast<char>(isConst)) {
     uint64_t fieldID = 0;
     fieldIDs.reserve(elements.size());
