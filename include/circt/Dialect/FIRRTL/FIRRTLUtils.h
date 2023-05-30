@@ -168,7 +168,10 @@ inline FIRRTLType mapBaseType(FIRRTLType type,
 /// Given a type, return the corresponding lowered type for the HW dialect.
 /// Non-FIRRTL types are simply passed through. This returns a null type if it
 /// cannot be lowered.
-Type lowerType(Type type);
+Type lowerType(
+    Type type, std::optional<Location> loc = {},
+    const std::function<hw::TypeAliasType(Type, BaseTypeAliasType, Location)>
+        &getTypeDeclFn = {});
 
 //===----------------------------------------------------------------------===//
 // Parser-related utilities
